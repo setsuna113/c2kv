@@ -30,6 +30,8 @@ class C2KVResidentPolicy:
     """
 
     def __init__(self, inner, backend):
+        from .policies import configure_retrieval_draft
+        configure_retrieval_draft(inner, backend)
         self.inner, self.backend = inner, backend
         self._resident = {}
         self._active = {}
@@ -111,6 +113,7 @@ class C2KVResidentPolicy:
         prepared.metadata["c2kv_resident_state"] = self._receipt(
             session_id, prepared.memory, "initial_racer_allocation",
             initial_policy_route)
+        prepared.metadata["racer_backend"] = self.backend.receipt()
         self._active[session_id] = _Decision(
             key, prepared, store, initial_policy_route, [prepared.memory])
         return prepared
@@ -129,6 +132,8 @@ class C2KVResidentPolicy:
         result["metadata"]["c2kv_resident_state"] = self._receipt(
             session_id, result["memory"], "post_draft_recovery",
             active.initial_policy_route)
+        result["metadata"]["racer_backend"] = self.backend.receipt()
+        result["decision"]["racer_backend"] = self.backend.receipt()
         return result
 
     def commit_memory(self, prepared, final_memory):

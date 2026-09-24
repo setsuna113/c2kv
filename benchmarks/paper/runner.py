@@ -19,6 +19,7 @@ from .candidate_matrix import (
 )
 from .racer_matrix import (
     is_racer_arm, parse_racer_backends, parse_racer_policies, parse_racer_protections,
+    parse_racer_retrieval_drafts,
     racer_v2_arm_name, racer_config_for_arm, resolve_racer_backend,
     resolve_unified_runtime_methods, unified_backend_for_arm, with_racer_methods,
 )
@@ -123,6 +124,8 @@ def tool_contexts(config):
 def cells(config):
     config = resolve_history_kv_budgets(config)
     contexts = tool_contexts(config)
+    retrieval_axis = any(method.get("racer_backend", {}).get("retrieval_draft") == "off"
+                         for method in config["methods"])
     rows = []
     for bench in config["benchmarks"]:
         for method in config["methods"]:
@@ -153,6 +156,9 @@ def cells(config):
                             **({"racer_mode": resolved["mode"]} if "mode" in resolved else {}),
                             **({"extra_protection": resolved["extra_protection"]}
                                if "extra_protection" in resolved else {}),
+                            **({"retrieval_draft": resolved.get("retrieval_draft", "on")}
+                               if retrieval_axis and resolved["schema"] == "racer-backend-v4"
+                               else {}),
                             calibration_status=resolved["detector_calibration"],
                             history_allocation=resolved["allocation"],
                         )
@@ -846,6 +852,8 @@ def _prepare_locked(config, output, source):
                            "history_allocation"])
         if any("extra_protection" in row for row in matrix):
             fields.append("extra_protection")
+        if any("retrieval_draft" in row for row in matrix):
+            fields.append("retrieval_draft")
         if any("tool_schema" in row for row in matrix):
             fields.append("tool_schema")
         if any(is_subset(row) for row in matrix):
@@ -1301,6 +1309,8 @@ def main(argv=None):
                         help="opt-in RACER policies: all or comma-separated exact policy names")
     parser.add_argument("--racer-protection", default="off,on",
                         help="extra protection values: off,on (default) or one value")
+    parser.add_argument("--racer-retrieval-draft", default="on",
+                        help="v4 lexical source query draft: on (default), off, or on,off")
     parser.add_argument("--racer-schema", choices=("v4", "v3", "v2"), default="v4",
                         help="v4 resident-unit protection (default); v3 and v2 remain frozen")
     parser.add_argument("--racer-history-budget", type=int,
@@ -1353,8 +1363,11 @@ def main(argv=None):
         racer_policies = parse_racer_policies(
             args.racer_policies, paired_off=args.racer_schema == "v2")
         racer_protections = parse_racer_protections(args.racer_protection)
+        racer_retrieval_drafts = parse_racer_retrieval_drafts(args.racer_retrieval_draft)
         if args.racer_schema == "v2" and args.racer_protection != "off,on":
             parser.error("--racer-protection applies only to --racer-schema v3 or v4")
+        if args.racer_schema != "v4" and racer_retrieval_drafts != ("on",):
+            parser.error("--racer-retrieval-draft applies only to --racer-schema v4")
         racer_budget = args.racer_history_budget
         if racer_backends or racer_policies:
             racer_budget = (racer_budget if racer_budget is not None else
@@ -1362,7 +1375,8 @@ def main(argv=None):
         config = with_racer_methods(
             config, racer_backends, racer_policies, racer_budget,
             protections=racer_protections if args.racer_schema != "v2" else None,
-            schema_version=args.racer_schema if args.racer_schema != "v2" else "v3")
+            schema_version=args.racer_schema if args.racer_schema != "v2" else "v3",
+            retrieval_drafts=racer_retrieval_drafts)
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:

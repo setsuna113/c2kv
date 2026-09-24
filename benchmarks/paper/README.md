@@ -986,6 +986,19 @@ protects selected resident units within each backend's existing budget and
 mandatory retention rules. StreamingLLM may exchange recent optional history
 for task pins under v4. No accuracy gain is implied by the CPU checks.
 
+`--racer-retrieval-draft on,off` adds an independent v4 lexical source-query
+axis for a candidate policy such as `c1_v2_verified`. The default `on` keeps
+the existing arm names and resolved configs. `off` uses
+`racer_v4_<backend>_<policy>_protection_<off|on>_retrieval_draft_off_bB` and
+records `retrieval_draft: "off"` in the resolved `racer_backend`, matrix, and
+receipts. For example, H2O with both protection values and both draft values
+produces four cells at B; all four retain the same C1 v2 Verified correction
+and detector. `policy=off` creates one non-querying baseline per protection
+value, even when both draft values are selected. The switch is limited to v4
+lexical candidate policies; v2/v3 and other retrieval mechanisms retain their
+existing contracts. The `prepare` action previews the resolved cells without
+running a benchmark.
+
 V4 proposes complete source records or contextual sentences and falls back to
 the complete event when a safe fragment cannot be identified. Candidates are
 admitted independently per actual selection row before eviction: an absent or

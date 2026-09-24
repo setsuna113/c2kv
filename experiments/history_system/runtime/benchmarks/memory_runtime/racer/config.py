@@ -31,6 +31,7 @@ class BackendConfig:
     mode: str | None = None
     schema: str = "racer-backend-v1"
     extra_protection: str | None = None
+    retrieval_draft: str = "on"
 
     @classmethod
     def parse(cls, value: Mapping):
@@ -50,6 +51,13 @@ class BackendConfig:
         if type(budget) is not int or budget <= 0:
             raise ValueError("history_budget_tokens must be a positive integer")
         result = cls(**{key: value[key] for key in cls.__dataclass_fields__ if key in value})
+        if result.retrieval_draft not in {"on", "off"}:
+            raise ValueError("RACER retrieval_draft must be on or off")
+        if result.retrieval_draft == "off":
+            if result.schema != "racer-backend-v4":
+                raise ValueError("Independent retrieval_draft=off requires racer-backend-v4")
+            if result.policy in ("off", "t02", *REPAIR_VARIANTS):
+                raise ValueError("retrieval_draft=off requires a shared lexical recovery policy")
         if result.schema in {"racer-backend-v3", "racer-backend-v4"}:
             if result.mode is not None or result.extra_protection not in {"off", "on"}:
                 raise ValueError("RACER v3/v4 requires independent extra_protection=off/on and no mode")
@@ -114,13 +122,17 @@ class BackendConfig:
         from dataclasses import asdict
         fields = asdict(self)
         fields.pop("schema")
+        if self.retrieval_draft == "on":
+            fields.pop("retrieval_draft")
         if self.schema not in {"racer-backend-v3", "racer-backend-v4"}:
             fields.pop("extra_protection")
         if self.schema in {"racer-backend-v3", "racer-backend-v4"}:
             fields.pop("mode")
             version = self.schema.rsplit("-", 1)[-1]
             identity = (f"racer:{version}:{self.backend}:{self.policy}:"
-                        f"protection_{self.extra_protection}:b{self.history_budget_tokens}")
+                        f"protection_{self.extra_protection}"
+                        + (":retrieval_draft_off" if self.retrieval_draft == "off" else "")
+                        + f":b{self.history_budget_tokens}")
         elif self.schema == "racer-backend-v1":
             fields.pop("mode")
             identity = f"racer:{self.backend}:{self.policy}:b{self.history_budget_tokens}"

@@ -90,7 +90,8 @@ _V3_ARM_PATTERN = re.compile(
 _V4_ARM_PATTERN = re.compile(
     r"^racer_v4_(?P<backend>" + "|".join(map(re.escape, RACER_BACKENDS)) + ")_"
     r"(?P<policy>" + "|".join(map(re.escape, RACER_POLICIES)) + ")_"
-    r"protection_(?P<protection>off|on)_b(?P<budget>[1-9][0-9]*)$"
+    r"protection_(?P<protection>off|on)"
+    r"(?P<retrieval_draft>_retrieval_draft_off)?_b(?P<budget>[1-9][0-9]*)$"
 )
 
 
@@ -135,6 +136,13 @@ def parse_racer_protections(value: str) -> tuple[str, ...]:
     return protections
 
 
+def parse_racer_retrieval_drafts(value: str) -> tuple[str, ...]:
+    retrieval_drafts = _unique_csv(value, label="RACER retrieval drafts")
+    if not set(retrieval_drafts) <= {"off", "on"}:
+        raise ValueError("RACER retrieval drafts must be off,on or a subset")
+    return retrieval_drafts
+
+
 def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str:
     """Frozen v1 arm identity; later schemas have separate names."""
     if backend not in RACER_BACKENDS or policy not in RACER_POLICIES:
@@ -171,12 +179,14 @@ def racer_v3_arm_name(backend: str, policy: str, history_budget_tokens: int,
 
 
 def racer_v4_arm_name(backend: str, policy: str, history_budget_tokens: int,
-                      extra_protection: str) -> str:
+                      extra_protection: str, retrieval_draft: str = "on") -> str:
     racer_arm_name(backend, policy, history_budget_tokens)
     if extra_protection not in {"off", "on"}:
         raise ValueError("unknown RACER extra protection")
+    if retrieval_draft not in {"off", "on"}:
+        raise ValueError("unknown RACER retrieval draft")
     return (f"racer_v4_{backend}_{policy}_protection_{extra_protection}_"
-            f"b{history_budget_tokens}")
+            f"{'retrieval_draft_off_' if retrieval_draft == 'off' else ''}b{history_budget_tokens}")
 
 
 def parse_racer_arm_identity(name: str) -> tuple[str, str, int, str | None]:
@@ -214,7 +224,8 @@ def is_racer_arm(name: str | None) -> bool:
 def resolve_racer_backend(backend: str, policy: str,
                           history_budget_tokens: int, *, mode: str | None = None,
                           extra_protection: str | None = None,
-                          schema_version: str = "v3") -> dict:
+                          schema_version: str = "v3",
+                          retrieval_draft: str = "on") -> dict:
     racer_arm_name(backend, policy, history_budget_tokens)
     if schema_version not in {"v3", "v4"}:
         raise ValueError("unknown RACER protection schema version")
@@ -222,11 +233,23 @@ def resolve_racer_backend(backend: str, policy: str,
         raise ValueError("RACER v2 mode and extra protection cannot be combined")
     if schema_version == "v4" and extra_protection is None:
         raise ValueError("RACER v4 requires extra protection off/on")
+    if retrieval_draft not in {"off", "on"}:
+        raise ValueError("unknown RACER retrieval draft")
+    if retrieval_draft == "off" and schema_version != "v4":
+        raise ValueError("RACER retrieval draft switch requires v4")
+    if retrieval_draft == "off" and policy == "off":
+        raise ValueError("RACER policy=off has no retrieval draft to disable")
+    if retrieval_draft == "off" and (policy == "t02" or policy in REPAIR_VARIANTS):
+        raise ValueError("RACER retrieval draft switch requires a lexical candidate policy")
     if mode is not None:
         racer_v2_arm_name(backend, policy, history_budget_tokens, mode)
     if extra_protection is not None:
         name = racer_v4_arm_name if schema_version == "v4" else racer_v3_arm_name
-        name(backend, policy, history_budget_tokens, extra_protection)
+        if schema_version == "v4":
+            name(backend, policy, history_budget_tokens, extra_protection,
+                 retrieval_draft)
+        else:
+            name(backend, policy, history_budget_tokens, extra_protection)
     backend_config = copy.deepcopy(_BACKEND_CONFIG[backend])
     if backend != "c2kv":
         backend_config["target_tokens"] = history_budget_tokens
@@ -237,6 +260,7 @@ def resolve_racer_backend(backend: str, policy: str,
         "policy": policy,
         **({"mode": mode} if mode is not None else {}),
         **({"extra_protection": extra_protection} if extra_protection is not None else {}),
+        **({"retrieval_draft": "off"} if retrieval_draft == "off" else {}),
         "history_budget_tokens": history_budget_tokens,
         "backend_config": backend_config,
         "detector_calibration": (
@@ -257,7 +281,8 @@ def resolve_racer_arm_backend(name: str) -> dict:
         return resolve_racer_backend(
             backend, policy, budget,
             extra_protection=marker.removeprefix("protection_"),
-            schema_version="v4" if name.startswith("racer_v4_") else "v3")
+            schema_version="v4" if name.startswith("racer_v4_") else "v3",
+            retrieval_draft="off" if "_retrieval_draft_off_b" in name else "on")
     return resolve_racer_backend(backend, policy, budget, mode=marker)
 
 
@@ -276,7 +301,8 @@ def validate_racer_backend(value: Mapping) -> dict:
         mode=value.get("mode") if schema == "racer-backend-v2" else None,
         extra_protection=value.get("extra_protection")
         if schema in {"racer-backend-v3", "racer-backend-v4"} else None,
-        schema_version="v4" if schema == "racer-backend-v4" else "v3")
+        schema_version="v4" if schema == "racer-backend-v4" else "v3",
+        retrieval_draft=value.get("retrieval_draft", "on"))
     if dict(value) != expected:
         raise ValueError("RACER backend config differs from its resolved arm contract")
     return expected
@@ -346,19 +372,25 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
                     methods.append(source)
                     continue
                 row = copy.deepcopy(source)
-                row.update(arm=(racer_arm_name(backend, policy, budget) if mode is None else
-                                (racer_v4_arm_name if arm.startswith("racer_v4_")
-                                 else racer_v3_arm_name)(backend, policy, budget,
-                                                         mode.removeprefix("protection_"))
-                                if mode.startswith("protection_") else
-                                racer_v2_arm_name(backend, policy, budget, mode)),
-                           history_budget_tokens=budget,
-                           racer_backend=(resolve_racer_backend(
-                               backend, policy, budget,
-                               extra_protection=mode.removeprefix("protection_"),
-                               schema_version="v4" if arm.startswith("racer_v4_") else "v3")
-                               if mode is not None and mode.startswith("protection_") else
-                               resolve_racer_backend(backend, policy, budget, mode=mode)))
+                retrieval_draft = source["racer_backend"].get("retrieval_draft", "on")
+                if mode is None:
+                    next_arm = racer_arm_name(backend, policy, budget)
+                    next_backend = resolve_racer_backend(backend, policy, budget)
+                elif mode.startswith("protection_"):
+                    protection = mode.removeprefix("protection_")
+                    version = "v4" if arm.startswith("racer_v4_") else "v3"
+                    next_arm = (racer_v4_arm_name(backend, policy, budget,
+                                                  protection, retrieval_draft)
+                                if version == "v4" else
+                                racer_v3_arm_name(backend, policy, budget, protection))
+                    next_backend = resolve_racer_backend(
+                        backend, policy, budget, extra_protection=protection,
+                        schema_version=version, retrieval_draft=retrieval_draft)
+                else:
+                    next_arm = racer_v2_arm_name(backend, policy, budget, mode)
+                    next_backend = resolve_racer_backend(backend, policy, budget, mode=mode)
+                row.update(arm=next_arm, history_budget_tokens=budget,
+                           racer_backend=next_backend)
                 methods.append(row)
                 continue
             raise ValueError(f"Unsupported unified history arm: {arm}")
@@ -417,14 +449,20 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
 def with_racer_methods(config: dict, backends: tuple[str, ...],
                        policies: tuple[str, ...], history_budget_tokens: int | None,
                        *, protections: tuple[str, ...] | None = None,
-                       schema_version: str = "v3") -> dict:
+                       schema_version: str = "v3",
+                       retrieval_drafts: tuple[str, ...] = ("on",)) -> dict:
     """Add versioned independent axes, or retain the frozen v2 overlay."""
     if schema_version not in {"v3", "v4"}:
         raise ValueError("unknown RACER protection schema version")
+    if (not retrieval_drafts or len(retrieval_drafts) != len(set(retrieval_drafts))
+            or not set(retrieval_drafts) <= {"off", "on"}):
+        raise ValueError("RACER retrieval drafts must be a nonempty unique subset of off,on")
+    if schema_version != "v4" and retrieval_drafts != ("on",):
+        raise ValueError("RACER retrieval draft switch requires v4")
     if protections is not None:
         return _with_racer_protection_methods(
             config, backends, policies, history_budget_tokens, protections,
-            schema_version)
+            schema_version, retrieval_drafts)
     if schema_version == "v4":
         raise ValueError("RACER v4 requires protection selections")
     if not backends and not policies and history_budget_tokens is None:
@@ -537,7 +575,8 @@ def with_racer_methods(config: dict, backends: tuple[str, ...],
 
 def _with_racer_protection_methods(config: dict, backends: tuple[str, ...],
                                    policies: tuple[str, ...], history_budget_tokens: int | None,
-                                   protections: tuple[str, ...], schema_version: str) -> dict:
+                                   protections: tuple[str, ...], schema_version: str,
+                                   retrieval_drafts: tuple[str, ...]) -> dict:
     if not backends and not policies and history_budget_tokens is None:
         return config
     if not backends or not policies or history_budget_tokens is None:
@@ -572,34 +611,42 @@ def _with_racer_protection_methods(config: dict, backends: tuple[str, ...],
         arm_name = racer_v4_arm_name if schema_version == "v4" else racer_v3_arm_name
         for policy in policies:
             for protection in protections:
-                arm = arm_name(backend, policy, history_budget_tokens, protection)
-                racer = resolve_racer_backend(backend, policy, history_budget_tokens,
-                                              extra_protection=protection,
-                                              schema_version=schema_version)
-                rows = existing.get(arm, ())
-                if len(rows) > 1:
-                    raise ValueError(f"RACER arm appears more than once in methods: {arm}")
-                if rows:
-                    row = rows[0]
-                    if (row.get("group") != "racer" or
-                            row.get("history_budget_tokens") != history_budget_tokens or
-                            row.get("racer_backend") != racer or _scope(row) != scope or
-                            row.get("recovery_policy") != policy or
-                            row.get("ratio") is not None or row.get("retention") is not None):
-                        raise ValueError(f"Existing RACER arm differs from its paired contract: {arm}")
-                    continue
-                row = {
-                    "method": f"RACER {backend} {policy} protection {protection}",
-                    "arm": arm, "group": "racer", "history_runtime": "racer",
-                    "history_backend": backend, "recovery_policy": policy,
-                    "history_budget_tokens": history_budget_tokens,
-                    "history_allocation": racer["allocation"], "racer_backend": racer,
-                    "benchmarks": list(scope[0]),
-                }
-                if scope[1] != ("raw",):
-                    row["tool_contexts"] = list(scope[1])
-                if backend == "c2kv":
-                    row["compression_ratio"] = 8
-                resolved["methods"].append(row)
-                existing[arm] = [row]
+                # policy=off never queries sources, so one default identity per
+                # protection is sufficient even when both draft choices are selected.
+                drafts = ("on",) if policy == "off" else retrieval_drafts
+                for retrieval_draft in drafts:
+                    arm = (arm_name(backend, policy, history_budget_tokens, protection,
+                                    retrieval_draft) if schema_version == "v4" else
+                           arm_name(backend, policy, history_budget_tokens, protection))
+                    racer = resolve_racer_backend(
+                        backend, policy, history_budget_tokens,
+                        extra_protection=protection, schema_version=schema_version,
+                        retrieval_draft=retrieval_draft)
+                    rows = existing.get(arm, ())
+                    if len(rows) > 1:
+                        raise ValueError(f"RACER arm appears more than once in methods: {arm}")
+                    if rows:
+                        row = rows[0]
+                        if (row.get("group") != "racer" or
+                                row.get("history_budget_tokens") != history_budget_tokens or
+                                row.get("racer_backend") != racer or _scope(row) != scope or
+                                row.get("recovery_policy") != policy or
+                                row.get("ratio") is not None or row.get("retention") is not None):
+                            raise ValueError(f"Existing RACER arm differs from its paired contract: {arm}")
+                        continue
+                    row = {
+                        "method": f"RACER {backend} {policy} protection {protection}"
+                                  + (" retrieval draft off" if retrieval_draft == "off" else ""),
+                        "arm": arm, "group": "racer", "history_runtime": "racer",
+                        "history_backend": backend, "recovery_policy": policy,
+                        "history_budget_tokens": history_budget_tokens,
+                        "history_allocation": racer["allocation"], "racer_backend": racer,
+                        "benchmarks": list(scope[0]),
+                    }
+                    if scope[1] != ("raw",):
+                        row["tool_contexts"] = list(scope[1])
+                    if backend == "c2kv":
+                        row["compression_ratio"] = 8
+                    resolved["methods"].append(row)
+                    existing[arm] = [row]
     return resolved

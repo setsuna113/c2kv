@@ -137,7 +137,9 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
     if racer is not None:
         identity_name = (f"racer:{racer['schema'].rsplit('-', 1)[-1]}:"
                          f"{racer['backend']}:{racer['policy']}:"
-                         f"protection_{racer['extra_protection']}:b{racer['history_budget_tokens']}"
+                         f"protection_{racer['extra_protection']}"
+                         f"{':retrieval_draft_off' if racer.get('retrieval_draft') == 'off' else ''}"
+                         f":b{racer['history_budget_tokens']}"
                          if racer["schema"] in {"racer-backend-v3", "racer-backend-v4"} else
                          f"racer:v2:{racer['backend']}:{racer['mode']}:{racer['policy']}:"
                          f"b{racer['history_budget_tokens']}"

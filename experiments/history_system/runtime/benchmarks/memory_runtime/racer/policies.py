@@ -7,6 +7,16 @@ from .allocator import PersistentHistoryAllocator
 from .config import BackendConfig
 
 
+def configure_retrieval_draft(controller, backend):
+    """Bind the optional query policy independently of initial allocation."""
+    if backend.retrieval_draft == "on":
+        return
+    setter = getattr(controller, "set_retrieval_draft", None)
+    if not callable(setter):
+        raise ValueError("This RACER policy does not support the lexical retrieval_draft switch")
+    setter(backend.retrieval_draft)
+
+
 def build_controller(tokenizer, *, config, packing, policy, model_context, benchmark):
     """Keep detector artifacts and policy implementations; substitute only KV admission."""
     from ..candidate_algorithms import INITIAL_VIEW_VARIANTS, STATIC_EXTENSION_VARIANTS, C1_V2_VARIANTS
@@ -161,6 +171,7 @@ class BackendPolicy:
     """Attach backend identity without changing policy state or commit decisions."""
 
     def __init__(self, inner, backend, *, native_allocator=None):
+        configure_retrieval_draft(inner, backend)
         self.inner, self.backend = inner, backend
         self.base = inner
         self.native_allocator = native_allocator

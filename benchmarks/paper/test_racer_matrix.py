@@ -19,7 +19,8 @@ from benchmarks.paper.racer_matrix import (
     RACER_BACKENDS, RACER_POLICIES, parse_racer_arm_name, parse_racer_arm_identity,
     racer_v2_arm_name, racer_v3_arm_name, racer_v4_arm_name, racer_config_for_arm,
     parse_racer_backends, parse_racer_policies, parse_racer_protections,
-    resolve_racer_backend, resolve_unified_runtime_methods, validate_racer_backend,
+    parse_racer_retrieval_drafts, resolve_racer_arm_backend, resolve_racer_backend,
+    resolve_unified_runtime_methods, validate_racer_backend,
     with_racer_methods,
 )
 
@@ -394,17 +395,111 @@ def test_v4_shared_budget_rewrites_arm_and_config_together():
     assert sum(row["arm"] == arm for row in resolved["methods"]) == 1
 
 
-@pytest.mark.parametrize("version", ["v3", "v4"])
+def test_v4_retrieval_draft_crossproduct_preserves_default_identity():
+    legacy = with_racer_methods(base_config(), ("h2o",), ("c1_v2_verified",), 256,
+                                protections=("off", "on"), schema_version="v4")
+    config = with_racer_methods(base_config(), ("h2o",),
+                                ("off", "c1_v2_verified"), 256,
+                                protections=("off", "on"), schema_version="v4",
+                                retrieval_drafts=("on", "off"))
+    rows = {row["arm"]: row for row in config["methods"]
+            if row.get("group") == "racer"}
+    assert len(rows) == 6
+    assert all("retrieval_draft_off" not in arm for arm in rows if "_off_protection_" in arm)
+    for protection in ("off", "on"):
+        default_arm = racer_v4_arm_name("h2o", "c1_v2_verified", 256, protection)
+        off_arm = racer_v4_arm_name("h2o", "c1_v2_verified", 256,
+                                    protection, "off")
+        assert default_arm in rows and off_arm in rows
+        assert rows[default_arm] == next(row for row in legacy["methods"]
+                                         if row["arm"] == default_arm)
+        assert "retrieval_draft" not in rows[default_arm]["racer_backend"]
+        assert rows[off_arm]["racer_backend"]["retrieval_draft"] == "off"
+        assert rows[off_arm]["recovery_policy"] == "c1_v2_verified"
+        assert parse_racer_arm_identity(off_arm) == (
+            "h2o", "c1_v2_verified", 256, f"protection_{protection}")
+        assert resolve_racer_arm_backend(off_arm) == rows[off_arm]["racer_backend"]
+        assert racer_config_for_arm(config, off_arm) == rows[off_arm]["racer_backend"]
+        wrong = copy.deepcopy(config)
+        next(row for row in wrong["methods"] if row["arm"] == off_arm)[
+            "racer_backend"].pop("retrieval_draft")
+        with pytest.raises(ValueError, match="arm identity differs"):
+            racer_config_for_arm(wrong, off_arm)
+    assert with_racer_methods(config, ("h2o",), ("off", "c1_v2_verified"), 256,
+                              protections=("off", "on"), schema_version="v4",
+                              retrieval_drafts=("on", "off")) == config
+
+
+def test_v4_retrieval_draft_off_only_and_shared_budget():
+    assert parse_racer_retrieval_drafts("off,on") == ("off", "on")
+    with pytest.raises(ValueError, match="retrieval drafts"):
+        parse_racer_retrieval_drafts("off,off")
+    config = with_racer_methods(base_config(), ("h2o",),
+                                ("off", "c1_v2_verified"), 256,
+                                protections=("on",), schema_version="v4",
+                                retrieval_drafts=("off",))
+    assert {row["arm"] for row in config["methods"] if row.get("group") == "racer"} == {
+        "racer_v4_h2o_off_protection_on_b256",
+        "racer_v4_h2o_c1_v2_verified_protection_on_retrieval_draft_off_b256",
+    }
+    config["history_kv_budget_tokens"] = 384
+    for row in config["methods"]:
+        if row.get("group") == "racer":
+            row["history_budget_source"] = "shared"
+    resolved = resolve_unified_runtime_methods(config)
+    assert {row["arm"] for row in resolved["methods"] if row.get("group") == "racer"} == {
+        "racer_v4_h2o_off_protection_on_b384",
+        "racer_v4_h2o_c1_v2_verified_protection_on_retrieval_draft_off_b384",
+    }
+    for row in resolved["methods"]:
+        if row.get("group") == "racer":
+            assert racer_config_for_arm(resolved, row["arm"]) == row["racer_backend"]
+    with pytest.raises(ValueError, match="lexical candidate policy"):
+        resolve_racer_backend("h2o", "t02", 256, extra_protection="on",
+                              schema_version="v4", retrieval_draft="off")
+
+
+def test_cli_v4_retrieval_draft_preview_records_four_cells(tmp_path, capsys):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(base_config()), encoding="utf-8")
+    output = tmp_path / "preview"
+    runner.main([
+        "prepare", "--config", str(config_path), "--output", str(output),
+        "--sglang-source", str(tmp_path / "engine"), "--racer-backends", "h2o",
+        "--racer-policies", "c1_v2_verified", "--racer-protection", "off,on",
+        "--racer-retrieval-draft", "on,off", "--racer-history-budget", "256",
+    ])
+    assert "closed_loop_cells" in capsys.readouterr().out
+    resolved = json.loads((output / "config.resolved.json").read_text(encoding="utf-8"))
+    methods = [row for row in resolved["methods"] if row.get("group") == "racer"]
+    assert len(methods) == 4
+    assert {row["racer_backend"].get("retrieval_draft", "on") for row in methods} == {
+        "on", "off"}
+    with (output / "matrix.csv").open(encoding="utf-8", newline="") as stream:
+        matrix = [row for row in csv.DictReader(stream)
+                  if row["group"] == "racer" and row["benchmark"] == "bfcl_base"]
+    assert len(matrix) == 4
+    assert {row["retrieval_draft"] for row in matrix} == {"on", "off"}
+    assert {row["extra_protection"] for row in matrix} == {"off", "on"}
+    assert all(row["recovery_policy"] == "c1_v2_verified" for row in matrix)
+
+
+@pytest.mark.parametrize("version,retrieval_draft", [
+    ("v3", "on"), ("v4", "on"), ("v4", "off"),
+])
 def test_protection_paper_delivery_keeps_same_c1_policy_for_both_flags(
-        tmp_path, monkeypatch, version):
+        tmp_path, monkeypatch, version, retrieval_draft):
     config = with_racer_methods(base_config(), ("h2o",), ("c1_v2_verified",), 256,
-                                protections=("off", "on"), schema_version=version)
+                                protections=("off", "on"), schema_version=version,
+                                retrieval_drafts=(retrieval_draft,))
     config["sglang_source"] = str(tmp_path / "engine")
     previous = c1.ARM
     try:
         for protection in ("off", "on"):
             arm_name = racer_v4_arm_name if version == "v4" else racer_v3_arm_name
-            arm = arm_name("h2o", "c1_v2_verified", 256, protection)
+            arm = (arm_name("h2o", "c1_v2_verified", 256, protection,
+                            retrieval_draft) if version == "v4" else
+                   arm_name("h2o", "c1_v2_verified", 256, protection))
             c1.select_arm(arm)
             delivery = c1.load_delivery()
             args = c1.delivery_args(config, "bfcl_base", tmp_path / protection, [], delivery)
@@ -412,9 +507,10 @@ def test_protection_paper_delivery_keeps_same_c1_policy_for_both_flags(
             assert args.candidate_algorithm == "c1_v2_verified"
             assert args.racer_backend_config == resolve_racer_backend(
                 "h2o", "c1_v2_verified", 256, extra_protection=protection,
-                schema_version=version)
+                schema_version=version, retrieval_draft=retrieval_draft)
             assert delivery.validate_racer_backend(args.racer_backend_config) == (
                 args.racer_backend_config)
+            assert delivery._model_name(args) == arm
             monkeypatch.setattr(delivery, "_build_profile_unbudgeted",
                                 lambda _args: ({"policy_config": "c1_v2_verified"},
                                                {"ratio": 8}))

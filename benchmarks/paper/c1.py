@@ -223,7 +223,8 @@ def method_label():
         if mode is not None:
             if mode.startswith("protection_"):
                 version = "v4" if ARM.startswith("racer_v4_") else "v3"
-                return f"RACER {version} {backend} {policy} {mode} b{budget}"
+                query = " retrieval_draft_off" if "_retrieval_draft_off_b" in ARM else ""
+                return f"RACER {version} {backend} {policy} {mode}{query} b{budget}"
             label = "bare" if mode == "bare" else f"{policy} {mode}"
             return f"RACER v2 {backend} {label} b{budget}"
         return f"RACER {backend} {policy} b{budget}"

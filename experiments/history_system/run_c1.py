@@ -37,11 +37,13 @@ RACER_CANDIDATE_POLICIES = tuple(ALL_VARIANTS)
 def racer_arm_name(backend: str, policy: str, history_budget_tokens: int,
                    mode: str | None = None,
                    extra_protection: str | None = None,
-                   schema: str = "racer-backend-v3") -> str:
+                   schema: str = "racer-backend-v3",
+                   retrieval_draft: str = "on") -> str:
     if extra_protection is not None:
         version = "v4" if schema == "racer-backend-v4" else "v3"
+        draft_suffix = "retrieval_draft_off_" if retrieval_draft == "off" else ""
         return (f"racer_{version}_{backend}_{policy}_protection_{extra_protection}_"
-                f"b{history_budget_tokens}")
+                f"{draft_suffix}b{history_budget_tokens}")
     if mode is None:
         return f"racer_{backend}_{policy}_b{history_budget_tokens}"
     suffix = ("bare" if mode == "bare" else
@@ -58,6 +60,8 @@ def validate_racer_backend(value: Mapping[str, Any]) -> dict:
     if parsed.backend != "c2kv":
         parsed.history_spec()
     normalized = asdict(parsed)
+    if parsed.retrieval_draft == "on":
+        normalized.pop("retrieval_draft")
     if parsed.schema != "racer-backend-v2":
         normalized.pop("mode")
     if parsed.schema not in {"racer-backend-v3", "racer-backend-v4"}:
@@ -436,7 +440,8 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         profile["racer_backend"] = racer
         profile["composition_identity"] = racer_arm_name(
             racer["backend"], racer["policy"], racer["history_budget_tokens"],
-            racer.get("mode"), racer.get("extra_protection"), racer["schema"])
+            racer.get("mode"), racer.get("extra_protection"), racer["schema"],
+            racer.get("retrieval_draft", "on"))
         profile["history_budget_tokens"] = racer["history_budget_tokens"]
         profile["calibration_status"] = racer["detector_calibration"]
         profile.pop("ratio", None)
@@ -493,7 +498,8 @@ def _model_name(args: argparse.Namespace) -> str:
     if racer is not None:
         return racer_arm_name(
             racer["backend"], racer["policy"], racer["history_budget_tokens"],
-            racer.get("mode"), racer.get("extra_protection"), racer["schema"])
+            racer.get("mode"), racer.get("extra_protection"), racer["schema"],
+            racer.get("retrieval_draft", "on"))
     if getattr(args, "candidate_algorithm", None) is not None:
         return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
@@ -1052,18 +1058,7 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     persistent_racer = False
     if racer_backend is not None:
         expected_racer = validate_racer_backend(racer_backend)
-        expected_identity = (
-            f"racer:{expected_racer['schema'].rsplit('-', 1)[-1]}:"
-            f"{expected_racer['backend']}:{expected_racer['policy']}:"
-            f"protection_{expected_racer['extra_protection']}:"
-            f"b{expected_racer['history_budget_tokens']}"
-            if expected_racer["schema"] in {"racer-backend-v3", "racer-backend-v4"} else
-            f"racer:v2:{expected_racer['backend']}:{expected_racer['mode']}:"
-            f"{expected_racer['policy']}:b{expected_racer['history_budget_tokens']}"
-            if expected_racer["schema"] == "racer-backend-v2" else
-            "racer:{backend}:{policy}:b{budget}".format(
-                backend=expected_racer["backend"], policy=expected_racer["policy"],
-                budget=expected_racer["history_budget_tokens"]))
+        expected_identity = BackendConfig.parse(expected_racer).receipt()["identity"]
         expected_receipt = telemetry.get("racer_backend_receipt")
         receipt_matches = isinstance(expected_receipt, Mapping) and all(
             expected_receipt.get(key) == value for key, value in expected_racer.items())

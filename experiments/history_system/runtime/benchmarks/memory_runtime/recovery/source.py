@@ -25,13 +25,24 @@ def select_source_event(
     include_latest_complete_observation: bool = False,
     explicit_revision_abstain: bool = True,
     allow_empty_draft_query: bool = False,
+    include_draft: bool = True,
 ):
     """Rank observable complete events for one held draft.
 
     The optional switches are used by the D3 hybrid route.  Their defaults
     intentionally preserve the frozen native D3 source policy.
+    Disabling include_draft removes both text and parsed-call query signals;
+    it does not change the caller's held draft or the eligible source pool.
     """
 
+    if type(include_draft) is not bool:
+        raise TypeError("include_draft must be a boolean")
+    if not isinstance(draft_text, str):
+        raise TypeError("draft_text must be a string")
+    # Only the retrieval query changes. The caller keeps the original draft
+    # for risk features, commit validation, and submission on abstention.
+    query_draft = draft_text if include_draft else ""
+    calls = valid_tool_calls(draft_tool_calls) if include_draft else []
     receipt = {
         "policy": (
             "current-goal-plus-held-draft-plus-latest-complete-observation-"
@@ -57,11 +68,15 @@ def select_source_event(
         "fabricated_tool_execution": False,
         "latest_complete_observation_in_query": False,
         "latest_complete_observation_event_id": None,
+        "draft_in_retrieval_query": include_draft,
     }
-    calls = valid_tool_calls(draft_tool_calls)
-    if not isinstance(draft_text, str):
-        raise TypeError("draft_text must be a string")
-    if not draft_text.strip() and not calls and not allow_empty_draft_query:
+    if not include_draft:
+        receipt["policy"] = (
+            "current-goal-plus-latest-complete-observation-visible-event-lexical-v1"
+            if include_latest_complete_observation
+            else "current-goal-visible-event-lexical-v1"
+        )
+    if include_draft and not query_draft.strip() and not calls and not allow_empty_draft_query:
         return None, receipt
     users = [event for event in prepared._store.events if event.kind == "user"]
     current_user = users[-1] if users else None
@@ -98,7 +113,7 @@ def select_source_event(
     ranked = rank_visible_source_events(
         prepared._store,
         current_user=current_user,
-        draft_text=draft_text,
+        draft_text=query_draft,
         draft_tool_calls=calls,
         eligible=eligible,
         excluded=excluded,

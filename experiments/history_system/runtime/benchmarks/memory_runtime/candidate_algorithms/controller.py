@@ -45,6 +45,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
         # C1 bridge into candidate-only replacement views.
         self.base.preserve_candidate_derived_messages = True
         self.threshold = float(threshold)
+        self.retrieval_draft = "on"
         self.risk_model = risk_model if risk_model is not None else C1RiskArtifact(config["risk_artifact"])
         self._reviewed_states = set()
 
@@ -78,6 +79,17 @@ class CandidateRecoveryController(EventNativeRecoveryController):
         return review_messages(prepared._store, goal, records,
                                token_counter=lambda rows: self.base._count(rows, ()),
                                token_budget=budget)
+
+    def set_retrieval_draft(self, mode):
+        """Configure source queries without changing risk or commit inputs."""
+        if mode not in {"on", "off"}:
+            raise ValueError("retrieval_draft must be on or off")
+        self.retrieval_draft = mode
+
+    def _select_source(self, prepared, draft_tool_calls, draft_text):
+        return select_source_event(prepared, draft_tool_calls, draft_text=draft_text,
+            include_latest_complete_observation=True, explicit_revision_abstain=False,
+            allow_empty_draft_query=True, include_draft=self.retrieval_draft == "on")
 
     def reconsider(self, prepared, draft_tool_calls, *, draft_text, parse_error=None):
         key = (prepared._store.session_id, prepared.metadata["decision_key"])
@@ -153,9 +165,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
                     return finish(review_reason, measure, metadata)
         if not triggered:
             return finish("risk_not_above_threshold")
-        _, source = select_source_event(prepared, draft_tool_calls, draft_text=draft_text,
-            include_latest_complete_observation=True, explicit_revision_abstain=False,
-            allow_empty_draft_query=True)
+        _, source = self._select_source(prepared, draft_tool_calls, draft_text)
         decision["source"] = source
         trials = []
         for candidate in source["ranked_candidate_event_ids"]:
