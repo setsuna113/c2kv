@@ -34,8 +34,9 @@ class PersistentRacerGenerator:
     session_cache_policy = "racer-persistent-transaction-v1"
     tool_transport_schema = "racer-tool-transport-v1"
 
-    def __init__(self, native, tokenizer, config, *, backend=None):
+    def __init__(self, native, tokenizer, config, *, backend=None, benchmark=None):
         self.native, self.tokenizer, self.config = native, tokenizer, config
+        self.benchmark = benchmark
         if backend is None:
             import benchmarks
             directory = str(Path(__file__).resolve().parents[6] / "benchmarks")
@@ -671,6 +672,12 @@ class PersistentRacerGenerator:
             # ACE executes the original action text; parsed calls only serve
             # recovery queries and are absent from the next source archive.
             committed["tool_calls"] = []
+        if self.benchmark == "toolsandbox" and committed.get("tool_calls"):
+            # ToolSandbox rebuilds an executed tool-call message from its calls
+            # and drops prose emitted with them (as raw_actor_history does for
+            # the proxy). This only shapes the expected echo; a commit still
+            # replays the raw generated text.
+            committed["content"] = ""
         self._pending_commit = {"response": committed, "resolution": self._resolution,
             "raw_text": self.tokenizer.decode(list(ids), skip_special_tokens=False,
                                                clean_up_tokenization_spaces=False)}

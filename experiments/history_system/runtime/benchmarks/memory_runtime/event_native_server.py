@@ -400,7 +400,8 @@ def _build_generator(
     )
     if racer_backend_config is not None and racer_backend_config.backend != 'c2kv':
         from .racer.generator import PersistentRacerGenerator
-        generator = PersistentRacerGenerator(generator, tokenizer, racer_backend_config)
+        generator = PersistentRacerGenerator(generator, tokenizer, racer_backend_config,
+                                             benchmark=getattr(args, 'benchmark', None))
     return generator, profile
 
 

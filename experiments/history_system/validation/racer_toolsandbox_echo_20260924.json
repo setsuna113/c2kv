@@ -1,0 +1,26 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "ToolSandbox calls-only echo of a committed RACER action",
+  "base_revision": "1b32ffc (engine b886b41 unchanged)",
+  "incident": {
+    "host": "box4",
+    "cells": "toolsandbox__racer_{commitkv,h2o,pyramidkv}_off_b256 (paper 9036c7b, engine 2223b597d, suite three_distraction_tools_129), each after 2 completed tasks (scheduler report)",
+    "checked_here": "/workspace/results-p2off2/closed_loop/toolsandbox__racer_h2o_off_b256.failed.1/native/task_shards/add_reminder_content_and_date_and_time_alt_3_distraction_tools/server/steps.jsonl: turn-0/step-0 committed content \"I'll help you add a reminder ... POSIX timestamp.\" plus one datetime_info_to_timestamp call (resolution commit); turn-0/step-1's new source row is {role assistant, content \"\", the same call id, name and parsed arguments}, then failed with SGLangEventNativeError \"RACER next source does not echo the committed action\"",
+    "cause": "PersistentRacerGenerator._ledger compares the echoed assistant row with the committed response by content and parsed calls. ToolSandbox rebuilds an executed tool-call message from its calls and drops prose emitted with them, as benchmarks/raw_actor_history._harness_echo already documents for the proxy path; 1b32ffc keeps the same strict comparison"
+  },
+  "change": {
+    "racer/generator.py": "PersistentRacerGenerator takes benchmark=None; for toolsandbox, resolve_decision expects a calls-only echo (content \"\") when the committed action has tool calls. A commit still replays the raw generated text, so the resident KV keeps the prose; call names and parsed arguments are still compared",
+    "event_native_server.py": "_build_generator passes args.benchmark to PersistentRacerGenerator",
+    "unchanged": "other benchmarks, text-only actions and every run that did not previously abort at this check"
+  },
+  "tests": {
+    "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_racer_toolsandbox_echo.py",
+    "cases": [
+      "real PersistentRacerGenerator + EventNativeDecisionRunner against a scripted engine: prose + call, then a ToolSandbox calls-only echo, commits and sends the raw generated action with resolution commit",
+      "the same echo under benchmark None or bfcl, and a ToolSandbox echo with changed arguments, still fail closed"
+    ],
+    "against_1b32ffc": "all 4 fail (no benchmark parameter; the ToolSandbox case fails the echo check)",
+    "gpu": "not run; rerun of the three ToolSandbox cells is the live check"
+  }
+}
