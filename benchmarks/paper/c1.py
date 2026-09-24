@@ -323,9 +323,15 @@ def run_closed_loop(config, benchmark, directory, requested=None):
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 final_path = task_root / "server" / "final.json"
                 final = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else {}
-                if final.get("cost_summary_error"):
-                    raise
-                failure = controller_step_failure(task_root)
+                wall_timeout = getattr(delivery, "TaskWallTimeout", None)
+                if wall_timeout is not None and isinstance(error, wall_timeout):
+                    # The controller was stopped mid-decision, so its journal
+                    # and cost summary are incomplete by construction.
+                    failure = ("harness_failure", "task_timeout", str(error))
+                else:
+                    if final.get("cost_summary_error"):
+                        raise
+                    failure = controller_step_failure(task_root)
                 if failure is None:
                     raise
                 if failure[1] in {"decision_cap_reached", "generation_cap_reached"}:
@@ -345,11 +351,17 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                            "failure": {"kind": kind, "message": message, "error": str(error)},
                            "qualification": ("harness failure: CUDA OOM in the C1 controller; "
                                              "scored 0, not a model decision") if kind == "cuda_oom"
+                           else ("harness failure: the task exceeded its wall limit; scored 0, "
+                                 "not a model decision") if kind == "task_timeout"
                            else ("declared native task budget exhausted; scored 0 as a "
                                  "task-local budget failure, not an official reward")
                            if kind in {"decision_cap_reached", "generation_cap_reached"}
                            else ("method failure: the controller declared this input infeasible "
                                  "under its budget; scored 0")}
+                if kind == "task_timeout":
+                    receipt["failure"].update(timeout_seconds=error.timeout_seconds,
+                                              elapsed_seconds=error.elapsed_seconds,
+                                              engine_cleanup=error.engine_cleanup)
                 metrics = {
                     "task_id": task,
                     "official_score": 0.0,

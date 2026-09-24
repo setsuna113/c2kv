@@ -1,0 +1,30 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "BFCL task wall timeout as a task-local harness failure with engine session release",
+  "base_revision": "paper 1afe5ff (engine 89c3895d7 unchanged)",
+  "incident": {
+    "cell": "bfcl_long_context__racer_v2_pyramidkv_c1_v2_verified_b256 s2 (SZ RTX 6000D, paper 077559f, engine b886b41)",
+    "task": "multi_turn_long_context_107",
+    "observed": "the last recorded step (turn-1/step-3) was ok; the server journals stopped at 11:31 while the next generation was in flight, and run_c1's worker.wait raised subprocess.TimeoutExpired at 10796 s; no final.json was written (the controller was killed mid-request); the TimeoutExpired escaped benchmarks.paper.c1's RuntimeError/CalledProcessError fallback and the remaining 43 tasks of the shard were not run",
+    "evidence": "$SZ_RESULTS_ROOT/v3-sz/b256/s2/prep/closed_loop/bfcl_long_context__racer_v2_pyramidkv_c1_v2_verified_b256.failed.1 and the s2 driver log (read-only)"
+  },
+  "change": {
+    "run_c1": "run_task raises TaskWallTimeout (a RuntimeError) when the official BFCL worker outlives the task limit; after stopping the worker and controller it calls release_engine_session, which aborts the in-flight engine request with the transport's lost-response call (/abort_request, wait_for_completion, close_session) or closes the idle session, and records a receipt without raising",
+    "benchmarks.paper.c1": "run_closed_loop scores a TaskWallTimeout 0 as status harness_failure, kind task_timeout (with timeout, elapsed and the engine cleanup receipt) and continues; the cell summary counts it under n_harness_failures"
+  },
+  "unchanged": [
+    "Tasks that finish within the limit run the same code and produce the same receipts.",
+    "Controller readiness timeouts, worker non-zero exits and every other failure keep their previous handling.",
+    "tau2, ToolSandbox, ACEBench and AppWorld runners are not changed; their own official-harness timeouts still end the cell."
+  ],
+  "tests": {
+    "file": "benchmarks/paper/test_c1_task_timeout.py (2 new; both fail on 1afe5ff, the first with the live subprocess.TimeoutExpired)",
+    "integration": "the real run_c1.run_task with a controller blocked on an in-flight generation, a sleeping worker and a stand-in engine: the timed-out task is scored 0 as harness_failure/task_timeout, the engine receives one /abort_request for the in-flight rid and session, and the next task completes",
+    "suites": "benchmarks, runtime memory_runtime and delivery suites have the same failure sets as 1afe5ff"
+  },
+  "open": [
+    "Scoring a timed-out task 0 is hardware dependent (the off arms finish task 107 in time on the same GPU type). The receipt marks it as a harness failure, not a model decision; whether such tasks are rerun with a larger limit or on faster GPUs, or reported as failures, is an evaluation decision.",
+    "Aborting a request during chunked prefill is not honoured by engine 89c3895d7 (the abort fix 36e969135 is on a separate branch). The receipt then reports status failed, and the engine finishes the orphaned request and later reaps the session."
+  ]
+}

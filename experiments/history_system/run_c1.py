@@ -1107,6 +1107,88 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     }
 
 
+class TaskWallTimeout(RuntimeError):
+    """The official worker outlived the task wall limit; only this task failed.
+
+    ``engine_cleanup`` records the release of the engine session the stopped
+    controller may have left open (``release_engine_session``).
+    """
+
+    def __init__(self, task: str, timeout_seconds: float, elapsed_seconds: float):
+        super().__init__(
+            f"Task {task} exceeded its {timeout_seconds:g} s wall limit after "
+            f"{elapsed_seconds:.0f} s")
+        self.task = task
+        self.timeout_seconds = timeout_seconds
+        self.elapsed_seconds = elapsed_seconds
+        self.engine_cleanup = None
+
+
+def _post_engine(args: argparse.Namespace, path: str, payload: Mapping[str, Any],
+                 timeout: float) -> Any:
+    request = Request(_bare_endpoint(args.sglang_backend_url) + path,
+                      data=json.dumps(payload).encode("utf-8"),
+                      headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read()
+    return json.loads(body) if body.strip() else None
+
+
+def release_engine_session(args: argparse.Namespace, server_dir: Path,
+                           *, timeout: float = 60.0) -> dict:
+    """Release the persistent engine session of a controller stopped at the wall.
+
+    A controller stopped during a generation is killed before it closes its
+    session, and the engine keeps generating for it.  Abort that request (or
+    close the idle session) with the call the transport itself uses after a
+    lost response.  Best effort: returns a receipt and never raises.
+    """
+    final_path = server_dir / "final.json"
+    try:
+        final = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else {}
+    except (OSError, ValueError):
+        final = {}
+    if (final.get("session_cache_after_close") or {}).get("closed") is True:
+        return {"status": "closed_by_controller"}
+    pending = {}
+    session_id = None
+    try:
+        lines = (server_dir / "sglang_http.jsonl").read_text(encoding="utf-8").splitlines()
+        rows = []
+        for index, line in enumerate(lines):
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                if index != len(lines) - 1:  # only a killed writer's last line may be cut
+                    raise
+        for row in rows:
+            request = row.get("request")
+            if row.get("event") == "request" and isinstance(request, dict):
+                persistent = (request.get("c2kv_kv_memory_hint") or {}).get(
+                    "persistent_history_session") or {}
+                session_id = persistent.get("session_id") or session_id
+                pending = {"rid": request.get("rid"), "session_id": persistent.get("session_id")}
+            elif row.get("event") == "response":
+                pending = {}
+    except (OSError, ValueError) as error:
+        return {"status": "unavailable", "error": f"{type(error).__name__}: {error}"}
+    if not isinstance(session_id, str) or not session_id:
+        return {"status": "no_persistent_session"}
+    try:
+        if isinstance(pending.get("rid"), str) and pending.get("session_id") == session_id:
+            receipt = _post_engine(args, "/abort_request", {
+                "rid": pending["rid"], "session_id": session_id,
+                "wait_for_completion": True, "close_session": True, "timeout": float(timeout),
+            }, timeout + 5)
+            return {"status": "aborted_in_flight_request", "rid": pending["rid"],
+                    "session_id": session_id, "engine_receipt": receipt}
+        _post_engine(args, "/close_session", {"session_id": session_id}, timeout)
+        return {"status": "closed_idle_session", "session_id": session_id}
+    except (HTTPError, URLError, OSError, ValueError) as error:
+        return {"status": "failed", "session_id": session_id,
+                "error": f"{type(error).__name__}: {error}"}
+
+
 def handled_capacity_failures(final: Mapping[str, Any], server_dir: Path) -> int:
     """Count failed attempts that are safe capacity fallbacks; 0 when none failed.
 
@@ -1135,7 +1217,7 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
         worker_env["PYTHONPATH"] = str(RUNTIME)
     else:
         worker_env["PYTHONPATH"] = os.pathsep.join((str(args.portable_root.resolve()), str(RUNTIME)))
-    process = worker = None
+    process = worker = wall_timeout = None
     deadline = time.monotonic() + args.task_timeout
     started = time.monotonic()
     summary_path = _official_summary_path(args, task_out)
@@ -1166,7 +1248,11 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                     worker_command, cwd=RUNTIME, env=worker_env, stdout=bench_log,
                     stderr=subprocess.STDOUT, start_new_session=os.name == "posix",
                 )
-                result = worker.wait(timeout=max(1, deadline - time.monotonic()))
+                try:
+                    result = worker.wait(timeout=max(1, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired as error:
+                    wall_timeout = TaskWallTimeout(task, args.task_timeout, time.monotonic() - started)
+                    raise wall_timeout from error
             if result:
                 raise RuntimeError(f"Official {args.benchmark} worker exited {result}; see {task_out / 'benchmark.log'}")
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -1180,6 +1266,8 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
             finally:
                 if process is not None:
                     runner._stop_server(process, task_out / "server.supervisor.json")
+                if wall_timeout is not None:
+                    wall_timeout.engine_cleanup = release_engine_session(args, task_out / "server")
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     if (final.get("cost_summary_error") or final.get("status") == "failed"
