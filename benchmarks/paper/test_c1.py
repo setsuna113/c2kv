@@ -272,6 +272,57 @@ def test_tau2_generation_cap_is_task_local_only_for_bound_typed_failure(
     assert json.loads((native / "result.json").read_text())["status"] == "completed"
 
 
+def test_unmatched_failed_attempt_still_scores_its_typed_step_zero(tmp_path, monkeypatch):
+    """1b32ffc regression: a failed attempt that is no capacity fallback raised
+    ValueError past the driver's RuntimeError fallback and aborted the cell."""
+    delivery = paper_c1.load_delivery()
+    from benchmarks.memory_runtime.attempt_journal import AttemptJournal, summarize_attempt_journal
+
+    cell = tmp_path / "cell"
+    native = cell / "native"
+    native.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
+    monkeypatch.setattr(paper_c1, "selected_tasks", lambda *_args: ["5", "6"])
+    monkeypatch.setattr(paper_c1, "prepare_native",
+                        lambda *_args: (native, None, tmp_path / "controller.json"))
+
+    def run_task(_config, _benchmark, task, _native, _delivery, _controller):
+        calls.append(task)
+        shard = native / "task_shards" / task
+        shard.mkdir(parents=True)
+        if task == "6":
+            metrics = {"task_id": task, "official_score": 1.0, "normal_termination": True}
+            return {"task_id": task, "status": "completed", "unified_metrics": metrics}, metrics
+        capacity_evidence(shard, benchmark="tau2")
+        journal = AttemptJournal(shard / "server" / "attempts.jsonl")
+        context = {"task_id": task, "decision_id": "turn-0/step-0"}
+        journal.finish(journal.start("generation", 1, "draft", context), "completed")
+        journal.finish(journal.start("generation", 2, "draft", context), "failed")
+        summary = summarize_attempt_journal(shard / "server" / "attempts.jsonl")
+        final = {"status": "stopped", "cost_summary": {"generation_calls": 2},
+                 "journal_summary": {key: summary[key] for key in (
+                     "schema", "started", "finished", "completed", "failed", "pending",
+                     "truncated_tail")}}
+        (shard / "server" / "final.json").write_text(json.dumps(final) + "\n")
+        with pytest.raises(ValueError, match="Unexpected failed model attempt"):
+            delivery.validate_handled_capacity_failures(final, shard / "server")
+        # The finalization sites use this wrapper: no capacity fallback, historical error.
+        delivery.handled_capacity_failures(final, shard / "server")
+        raise AssertionError("an unmatched failed attempt must not be accepted")
+
+    monkeypatch.setattr(native_extra, "run_task", run_task)
+    assert paper_c1.run_closed_loop({}, "tau2", cell) == native
+    assert calls == ["5", "6"]
+    failed = json.loads((native / "task_shards" / "5" / "paper_task_result.json").read_text())
+    assert (failed["status"], failed["failure"]["kind"]) == ("method_failure", "capacity_infeasible")
+    assert "outside a safe capacity fallback" in failed["failure"]["error"]
+    assert json.loads((native / "task_shards" / "6" / "paper_task_result.json").read_text())[
+        "status"] == "completed"
+    assert delivery.handled_capacity_failures(
+        {"journal_summary": {"failed": 0}}, tmp_path / "unused") == 0
+
+
 def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     shard = tmp_path / "task_shards" / "multi_turn_long_context_101"
     capacity_evidence(shard)
@@ -466,7 +517,7 @@ def test_replay_accepts_only_validated_capacity_fallback(tmp_path):
         "status": "stopped", "journal_summary": {"completed": 1, "failed": 1, "pending": 0},
         "cost_summary": {"generation_calls": 2}}))
     seen = []
-    delivery = SimpleNamespace(validate_handled_capacity_failures=lambda final, path: (
+    delivery = SimpleNamespace(handled_capacity_failures=lambda final, path: (
         seen.append((final["journal_summary"]["failed"], path)) or 1))
     paper_c1.validate_replay_finalization(tmp_path, delivery=delivery)
     assert seen == [(1, server)]

@@ -597,7 +597,7 @@ def run_task(
     final = json.loads(final_path.read_text(encoding="utf-8"))
     journal = final.get("journal_summary") or {}
     run_c1 = _delivery_run_c1(delivery, runner)
-    safe_failed = (run_c1.validate_handled_capacity_failures(final, task_out / "server")
+    safe_failed = (run_c1.handled_capacity_failures(final, task_out / "server")
                    if journal.get("failed") else 0)
     if (
         official is None or telemetry_path is None or run_dir is None

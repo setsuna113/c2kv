@@ -330,7 +330,7 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     raise
                 if failure[1] in {"decision_cap_reached", "generation_cap_reached"}:
                     journal = final.get("journal_summary") or {}
-                    safe_failures = (getattr(delivery, "validate_handled_capacity_failures", None)
+                    safe_failures = (getattr(delivery, "handled_capacity_failures", None)
                                      if journal.get("failed") else None)
                     if (not final or final.get("status") == "failed"
                             or (journal.get("failed") and (safe_failures is None
@@ -509,7 +509,7 @@ def validate_replay_finalization(task_root, *, declared_failure=False, delivery=
     if declared_failure:
         return
     journal = final.get("journal_summary") or {}
-    safe_failed = ((delivery or load_delivery()).validate_handled_capacity_failures(
+    safe_failed = ((delivery or load_delivery()).handled_capacity_failures(
         final, task_root / "server") if journal.get("failed") else 0)
     if (final.get("status") != "stopped" or final.get("error")
             or (journal.get("failed") and not safe_failed) or journal.get("pending")

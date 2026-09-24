@@ -1107,6 +1107,22 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     }
 
 
+def handled_capacity_failures(final: Mapping[str, Any], server_dir: Path) -> int:
+    """Count failed attempts that are safe capacity fallbacks; 0 when none failed.
+
+    Any other failed attempt keeps the historical RuntimeError, so the paper
+    driver can still score a typed step failure 0 and continue the cell.
+    """
+    if not (final.get("journal_summary") or {}).get("failed"):
+        return 0
+    try:
+        return validate_handled_capacity_failures(final, server_dir)
+    except ValueError as error:
+        raise RuntimeError(
+            f"Model attempts failed outside a safe capacity fallback: {error}; "
+            f"see {Path(server_dir) / 'final.json'}") from error
+
+
 def run_task(args: argparse.Namespace, task: str, controller_path: Path,
              *, termination_guard=None) -> tuple[dict, dict]:
     server_command, worker_command = commands_for_task(args, task, controller_path)
@@ -1171,7 +1187,7 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
         raise RuntimeError(f"Controller finalization failed; see {final_path}")
     journal = final.get("journal_summary") or {}
     if (journal.get("pending") or not journal.get("completed")
-            or (journal.get("failed") and not validate_handled_capacity_failures(
+            or (journal.get("failed") and not handled_capacity_failures(
                 final, task_out / "server"))):
         raise RuntimeError(f"Model attempts failed, remain pending, or are missing; see {final_path}")
     telemetry = summarize_task(args.benchmark, task, task_out, summary, time.monotonic() - started)

@@ -546,7 +546,7 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     final = json.loads(final_path.read_text(encoding="utf-8"))
     journal = final.get("journal_summary") or {}
     run_c1 = c1_appworld._delivery_run_c1(delivery, runner)
-    safe_failed = (run_c1.validate_handled_capacity_failures(final, task_out / "server")
+    safe_failed = (run_c1.handled_capacity_failures(final, task_out / "server")
                    if journal.get("failed") else 0)
     adapter_failure = _official_task_failure(official, task)
     started_count = journal.get("started")
