@@ -98,6 +98,8 @@ def tool_contexts(config):
     """
     from benchmarks.toolmemory import parse_tool_memory_spec
 
+    if "tool_recovery" in config:
+        raise ValueError("Put tool_recovery on a named tool_context, not the matrix config")
     contexts = {RAW_TOOL_CONTEXT: {"name": RAW_TOOL_CONTEXT, "spec": "", "checkpoint": ""}}
     for item in config.get("tool_contexts") or []:
         name = str(item.get("name") or "")
@@ -113,6 +115,11 @@ def tool_contexts(config):
         contexts[name] = {"name": name, "spec": str(item["spec"]),
                           "checkpoint": str(item["checkpoint"]),
                           "interface_policy": spec.interface_policy}
+        recovery = item.get("tool_recovery", "none")
+        if recovery not in {"none", "draft-full-raw", "always-full-raw"}:
+            raise ValueError(f"tool context {name!r} has unknown tool_recovery {recovery!r}")
+        if recovery != "none":
+            contexts[name]["tool_recovery"] = recovery
         if item.get("budget_tokens") is not None:
             budget = item["budget_tokens"]
             if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
@@ -129,6 +136,8 @@ def cells(config):
     rows = []
     for bench in config["benchmarks"]:
         for method in config["methods"]:
+            if "tool_recovery" in method:
+                raise ValueError("Put tool_recovery on a named tool_context, not a method")
             # an optional per-method benchmark list restricts an ablation to some benchmarks
             if method.get("benchmarks") and bench["name"] not in method["benchmarks"]:
                 continue
@@ -175,6 +184,9 @@ def cells(config):
                         budget.validate_arm(arm)
                         row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                 if context_name != RAW_TOOL_CONTEXT:
+                    if context.get("tool_recovery") and not is_native_arm(method["arm"]):
+                        raise ValueError(
+                            f"tool recovery requires an event-native arm: {method['arm']}")
                     row["cell_id"] += "__tools-" + context_name
                     row["tool_memory"] = context["spec"]
                     if context["interface_policy"] != "none":
@@ -182,6 +194,8 @@ def cells(config):
                     row["tool_checkpoint"] = context["checkpoint"]
                     if context.get("budget_tokens") is not None:
                         row["tool_budget_tokens"] = context["budget_tokens"]
+                    if context.get("tool_recovery"):
+                        row["tool_recovery"] = context["tool_recovery"]
                 if "tool_schema" in row:
                     # Explicit native tool-prologue schema; only native controller
                     # arms render their own prologue, and only a non-default mode
@@ -215,7 +229,9 @@ def with_tool_contexts(config, names, checkpoint=None):
         arm = get_arm(method["arm"])
         current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
         text_arm = (arm.text_policy or "").startswith(("acon", "hiagent"))
-        allowed = [name for name in names if not text_arm or contexts[name]["interface_policy"] == "schema"]
+        allowed = [name for name in names
+                   if (not text_arm or contexts[name]["interface_policy"] == "schema")
+                   and (not contexts[name].get("tool_recovery") or is_native_arm(arm.name))]
         if not allowed:
             methods.append(method)
             continue
@@ -549,6 +565,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                 cmd += ["--tool-checkpoint", cell["tool_checkpoint"]]
             if cell.get("tool_budget_tokens") is not None:
                 cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
+            if cell.get("tool_recovery"):
+                cmd += ["--tool-recovery", cell["tool_recovery"]]
         if "tool_schema" in cell:
             cmd += NativeToolSchema(cell["tool_schema"]).cli_args()
         if stage == "common_prefix":
@@ -664,6 +682,7 @@ def extension_problem(existing, config, source, output):
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
                     "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
+                    "tool_recovery",
                     "history_budget_tokens", "tool_schema", "racer_backend",
                     "history_backend", "racer_policy", "calibration_status",
                     "history_allocation"):
@@ -843,6 +862,8 @@ def _prepare_locked(config, output, source):
         fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
         if any("tool_interface_policy" in row for row in matrix):
             fields.append("tool_interface_policy")
+        if any("tool_recovery" in row for row in matrix):
+            fields.append("tool_recovery")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
         if any("history_runtime" in row for row in matrix):

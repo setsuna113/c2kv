@@ -1,8 +1,9 @@
-"""Optional visible-tool planning around the unchanged history controller.
+"""Optional visible-tool planning around the history controller.
 
 The tool catalog lives in the paper checkout. This adapter keeps its plan on
-each prepared decision, including decisions revisited for recovery. OFF does
-not construct this adapter and therefore preserves the original request path.
+each prepared decision. Opt-in tool recovery supplements the selected history
+view with the full catalog before one shared regeneration. OFF does not
+construct this adapter and therefore preserves the original request path.
 """
 from __future__ import annotations
 
@@ -22,6 +23,19 @@ from history_memory.source_packing import SourceMemoryView
 from .event_native_raw import RuntimeMemoryView, render_raw_control_messages
 
 _CATALOG_NAME = "c2kv_shared_toolmemory"
+TOOL_RECOVERY_MODES = ("none", "draft-full-raw", "always-full-raw")
+
+
+def validate_tool_recovery_config(spec, mode, budget_tokens=None):
+    if mode not in TOOL_RECOVERY_MODES:
+        raise ValueError("Unknown tool recovery mode")
+    if mode == "none":
+        return
+    if (spec is None or spec.encoder != "t0" or spec.layout != "uniform"
+            or spec.interface_policy != "schema"):
+        raise ValueError("Tool recovery requires T0 uniform schema tool memory")
+    if budget_tokens is not None:
+        raise ValueError("Tool recovery does not use a tool token budget")
 
 
 def shared_tool_catalog():
@@ -50,9 +64,10 @@ def parse_native_tool_spec(value: str | None):
 
 def validate_ready_tool_contract(manifest: Mapping[str, Any], tool_memory: str | None,
                                  checkpoint: str | Path | None = None,
-                                 budget_tokens: int | None = None) -> None:
+                                 budget_tokens: int | None = None,
+                                 tool_recovery: str = "none") -> None:
     shared_tool_catalog().validate_ready_tool_contract(
-        manifest, tool_memory, checkpoint, budget_tokens)
+        manifest, tool_memory, checkpoint, budget_tokens, tool_recovery=tool_recovery)
 
 
 class _TokenizerView:
@@ -74,18 +89,28 @@ class ToolPrepared:
     max_new_tokens: int
     source_payload: dict[str, Any]
     history_views: list = field(default_factory=list, repr=False, compare=False)
+    recovery_state: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __getattr__(self, name: str):
         return getattr(self.inner, name)
 
 
 class ToolRegionController:
-    """Preserve a single visible catalog through draft and every recovery view."""
+    """Keep the visible catalog fixed while optionally restoring its documents."""
 
     def __init__(self, inner: Any, tokenizer: Any, spec: Any, *,
                  model_context: int, generator: Any,
                  tool_budget_tokens: int | None = None,
-                 tool_checkpoint_contract: Mapping[str, Any] | None = None):
+                 tool_checkpoint_contract: Mapping[str, Any] | None = None,
+                 tool_recovery: str = "none"):
+        validate_tool_recovery_config(spec, tool_recovery, tool_budget_tokens)
+        if tool_recovery != "none":
+            if callable(getattr(generator, "bind_tool_plan", None)):
+                raise ValueError("Tool recovery currently requires the native C2KV generator")
+            if (callable(getattr(inner, "finalize_commit", None))
+                    and not callable(getattr(inner, "invalidate_draft_commit", None))):
+                raise ValueError("Tool recovery requires a controller that can invalidate draft proofs")
+            self.max_recovery_rounds = 1
         self.inner = inner
         self.tokenizer = tokenizer
         self.spec = spec
@@ -93,24 +118,26 @@ class ToolRegionController:
         self.generator = generator
         self.tool_budget_tokens = tool_budget_tokens
         self.tool_checkpoint_contract = dict(tool_checkpoint_contract or {})
+        self.tool_recovery = tool_recovery
         self._original_tools: dict[str, str] = {}
 
     def __getattr__(self, name: str):
         if name == "advance_recovery":
             advance = getattr(self.inner, name)
             return lambda prepared, **kwargs: advance(prepared.inner, **kwargs)
-        if name in ("validate_commit", "finalize_commit"):
+        if name in ("validate_commit", "finalize_commit", "restore_draft_commit"):
             hook = getattr(self.inner, name)
             return lambda prepared, *args, **kwargs: hook(
                 prepared.inner if isinstance(prepared, ToolPrepared) else prepared, *args, **kwargs)
         return getattr(self.inner, name)
 
-    def _plan(self, payload: Mapping[str, Any]):
+    def _plan(self, payload: Mapping[str, Any], *, native_override=None):
         catalog = shared_tool_catalog()
         plan = catalog.plan_visible_tool_memory(
             payload, self.spec,
             _TokenizerView(self.tokenizer) if (self.spec.encoder == "t0"
                 or self.spec.interface_policy == "schema") else None,
+            native_override=native_override,
         )
         prepare = getattr(self.generator, "prepare_tool_plan", None)
         if plan is not None and callable(prepare):
@@ -537,6 +564,11 @@ class ToolRegionController:
             raise ValueError("Tools changed within a session; use a new explicit session_id")
         whole_full_tokens = self._whole_full_tokens(payload)
         plan = self._plan(payload)
+        if self.tool_recovery != "none" and plan is not None and plan.source_spans:
+            raise ValueError("Tool recovery currently supports structured tool catalogs only")
+        if (self.tool_recovery != "none" and plan is not None
+                and payload["messages"][0].get("role") != "system"):
+            raise ValueError("Tool recovery requires an existing source system message")
         base = self.inner.prepare(
             self._controller_payload(payload, plan), ratio=ratio,
             max_new_tokens=max_new_tokens)
@@ -559,6 +591,11 @@ class ToolRegionController:
         metadata["tool_memory"]["anchored_segments"] = len(memory.tool_gist_segments)
         metadata["tool_memory"]["prefix_tool_chunks"] = sum(
             chunk.projection_set == "tool" for chunk in memory.chunks)
+        if self.tool_recovery != "none":
+            metadata["tool_memory"]["recovery_policy"] = self.tool_recovery
+            metadata.setdefault("route", {}).update(
+                tool_recovery=self.tool_recovery, recovery_enabled=True,
+                max_generations_per_decision=2)
         if memory.raw_tool_segments:
             metadata["tool_memory"]["raw_tool_segments"] = [
                 dict(item) for item in memory.raw_tool_segments]
@@ -575,30 +612,140 @@ class ToolRegionController:
                             max_new_tokens, copy.deepcopy(dict(payload)),
                             [(memory, base.memory)])
 
+    def observe_generation_budget(self, prepared, *, remaining_generation_calls):
+        """Use the runner's actual shared count, including tool-only recoveries."""
+        prepared.recovery_state["remaining_generation_calls"] = remaining_generation_calls
+        if self.tool_recovery != "none":
+            observe = getattr(self.inner, "observe_tool_generation_budget", None)
+            if callable(observe):
+                observe(prepared.inner, remaining_generation_calls=remaining_generation_calls)
+
+    def _tool_recovery_receipt(self, prepared, calls, parse_error):
+        catalog = shared_tool_catalog()
+        plan = prepared.plan
+        called = sorted({catalog.tool_name(call) for call in calls
+                         if isinstance(call, Mapping) and catalog.tool_name(call)})
+        missing = []
+        if plan is not None:
+            native = set(plan.info["native_indices"])
+            missing = [index for index, tool in enumerate(prepared.source_payload.get("tools") or [])
+                       if index not in native and catalog.tool_name(tool) in called]
+        if plan is None:
+            reason = "no_visible_tool_region"
+        elif plan.info["all_native"]:
+            reason = "all_tool_documents_already_raw"
+        elif self.tool_recovery == "always-full-raw":
+            reason = "always_restore_control"
+        elif parse_error is not None:
+            reason = "malformed_draft"
+        elif missing:
+            reason = "called_tool_document_compressed"
+        else:
+            reason = "no_compressed_called_tool"
+        return {
+            "schema": "c2kv-tool-recovery-v1", "policy": self.tool_recovery,
+            "trigger_semantics": "document_coverage_not_action_correctness",
+            "triggered": reason in {"called_tool_document_compressed", "always_restore_control"},
+            "reason": reason, "called_tool_names": called,
+            "missing_called_tool_indices": missing, "tool_budget_tokens": None,
+            "restored_tool_indices": [], "status": "not_triggered",
+        }
+
+    def _recover_tools(self, prepared, calls, parse_error, value):
+        """Combine tool supplementation with the history controller's chosen view."""
+        from .tool_recovery_packing import (
+            ToolRecoveryContextExceeded, rebuild_tool_history_memory,
+        )
+        result = dict(value)
+        result["decision"] = copy.deepcopy(value["decision"])
+        receipt = self._tool_recovery_receipt(prepared, calls, parse_error)
+        plan, memory = prepared.plan, value["memory"]
+        remaining = prepared.recovery_state.get("remaining_generation_calls")
+        if remaining is not None and remaining <= 0:
+            receipt["status"] = "shared_generation_limit"
+            result.update(regenerate=False, memory=prepared.inner.memory,
+                          metadata=prepared.inner.metadata)
+            result["decision"].update(status="abstain", reason="shared_task_generation_limit",
+                                      regeneration_allowed=False)
+            memory = prepared.inner.memory
+        elif receipt["triggered"]:
+            replacement = self._plan(prepared.source_payload,
+                                     native_override=range(plan.info["n_tools"]))
+            try:
+                memory = rebuild_tool_history_memory(
+                    self.tokenizer, value["memory"], value["metadata"],
+                    prepared.source_payload, plan.messages, replacement.messages,
+                    ratio=prepared.ratio, max_new_tokens=prepared.max_new_tokens,
+                    model_context=self.model_context, benchmark=getattr(self.inner, "benchmark", None))
+            except ToolRecoveryContextExceeded:
+                receipt["status"] = "model_context_exceeded"
+            else:
+                plan = replacement
+                receipt.update(status="restored", restored_tool_indices=list(plan.info["native_indices"]),
+                               history_regeneration_requested=bool(value["regenerate"]))
+                invalidate = getattr(self.inner, "invalidate_draft_commit", None)
+                if callable(invalidate):
+                    result["decision"]["verified_binding"] = invalidate(
+                        prepared.inner, reason="tool_document_restoration")
+                result["decision"].update(
+                    status="recover", reason="tool_documents_restored", regeneration_allowed=True,
+                    history_recovery=copy.deepcopy(value["decision"]))
+                result["regenerate"] = True
+        result["decision"]["tool_recovery"] = receipt
+        result["metadata"] = copy.deepcopy(result["metadata"])
+        result["metadata"]["exact_recovery"] = copy.deepcopy(result["decision"])
+        return result, plan, memory
+
     def reconsider(self, prepared: ToolPrepared, draft_tool_calls, *,
                    draft_text: str, parse_error: str | None = None):
         if not isinstance(prepared, ToolPrepared):
             raise TypeError("Expected a tool-planned prepared decision")
+        if self.tool_recovery != "none":
+            signature = json.dumps([draft_tool_calls, draft_text, parse_error], sort_keys=True,
+                                   ensure_ascii=False, allow_nan=False)
+            state = prepared.recovery_state
+            if "result" in state:
+                if signature != state["signature"] or state["owner"] != id(self):
+                    raise ValueError("Tool recovery cannot inspect another held draft")
+                result = copy.deepcopy(state["result"])
+                prepared.history_views.append((result["memory"], state["history_memory"]))
+                return result
         value = self.inner.reconsider(
             prepared.inner, draft_tool_calls, draft_text=draft_text,
             parse_error=parse_error)
         result = dict(value)
+        plan, rendered_memory = prepared.plan, value["memory"]
+        if self.tool_recovery != "none":
+            # The inner controller still sees the original shared draft. Only
+            # its selected history representation is rebuilt with raw tools.
+            result, plan, rendered_memory = self._recover_tools(
+                prepared, draft_tool_calls, parse_error, value)
         result["memory"] = self._augment(
-            value["memory"], prepared.plan, prepared.source_payload,
+            rendered_memory, plan, prepared.source_payload,
             ratio=prepared.ratio, max_new_tokens=prepared.max_new_tokens,
             derived_messages=value["metadata"].get("derived_workspace_prefix_messages") or (),
         )
-        prepared.history_views.append((result["memory"], value["memory"]))
-        result["metadata"] = copy.deepcopy(value["metadata"])
+        history_memory = (prepared.inner.memory if result["decision"].get("reason") == "shared_task_generation_limit"
+                          else value["memory"])
+        prepared.history_views.append((result["memory"], history_memory))
+        result["metadata"] = copy.deepcopy(result["metadata"])
         result["metadata"]["paper_whole_full_kv_tokens"] = prepared.metadata[
             "paper_whole_full_kv_tokens"]
-        result["metadata"]["history_only_resident_kv_tokens"] = value["memory"].costs(
+        result["metadata"]["history_only_resident_kv_tokens"] = history_memory.costs(
             prepared.ratio)["resident_kv_tokens"]
-        result["metadata"]["history_only_gist_tokens"] = value["memory"].costs(
+        result["metadata"]["history_only_gist_tokens"] = history_memory.costs(
             prepared.ratio)["gist_tokens"]
         result["metadata"]["tool_memory"] = copy.deepcopy(prepared.metadata["tool_memory"])
-        if self.spec.encoder != "t0" and self.spec.interface_policy == "schema":
-            result["metadata"]["tool_memory"] = copy.deepcopy(prepared.plan.info)
+        if plan is not prepared.plan or (self.spec.encoder != "t0" and self.spec.interface_policy == "schema"):
+            result["metadata"]["tool_memory"] = copy.deepcopy(plan.info)
+        if self.tool_recovery != "none":
+            result["metadata"]["tool_memory"]["recovery"] = copy.deepcopy(result["decision"]["tool_recovery"])
+            result["metadata"]["tool_memory"]["recovery_policy"] = self.tool_recovery
+            result["metadata"]["raw_prompt_tokens"] = (
+                len(result["memory"].system_input_ids) + len(result["memory"].workspace_input_ids))
+            result["metadata"].setdefault("route", {}).update(
+                tool_recovery=self.tool_recovery, recovery_enabled=True,
+                max_generations_per_decision=2)
         result["metadata"]["tool_memory"]["anchored_segments"] = len(
             result["memory"].tool_gist_segments)
         result["metadata"]["tool_memory"]["prefix_tool_chunks"] = sum(
@@ -612,6 +759,9 @@ class ToolRegionController:
         if isinstance(binding, Mapping):
             result["metadata"]["tool_memory"]["persistent_binding"] = copy.deepcopy(
                 dict(binding))
+        if self.tool_recovery != "none":
+            prepared.recovery_state.update(signature=signature, owner=id(self),
+                                           result=copy.deepcopy(result), history_memory=history_memory)
         return result
 
     def commit_memory(self, prepared: ToolPrepared, final_memory):

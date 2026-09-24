@@ -126,7 +126,9 @@ class CandidateRecoveryController(EventNativeRecoveryController):
             prepared._checked_result = copy.deepcopy(result)
             return result
 
-        if decision["decision_index"] + self._recovery_counts.get(key[0], 0) + 1 > self.required_task_generation_limit:
+        if (getattr(prepared, "_shared_remaining_generation_calls", 1) <= 0
+                or decision["decision_index"] + self._recovery_counts.get(key[0], 0) + 1
+                > self.required_task_generation_limit):
             return finish("shared_task_generation_limit")
         context = context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error)
         prediction = self.risk_model.predict_risk(context)

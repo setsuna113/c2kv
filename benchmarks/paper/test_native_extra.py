@@ -159,6 +159,20 @@ def test_tool_on_c1_uses_recovery_controller_and_tool_flags(tmp_path, benchmark)
     assert value("--tool-budget-tokens") == "512"
 
 
+@pytest.mark.parametrize("benchmark", ["acebench_agent", "toolsandbox", "tau2"])
+def test_tool_recovery_reaches_native_server_command(tmp_path, benchmark):
+    config = _config(tmp_path)
+    config.update(native_arm="c2kv_c1_t02_r8", tool_memory="t0:r8:uniform:schema",
+                  tool_checkpoint=str(tmp_path / "T0"), tool_recovery="draft-full-raw")
+    root = Path(__file__).resolve().parents[2] / "experiments" / "history_system"
+    controller = tmp_path / "controller.json"
+    controller.write_text("{}", encoding="utf-8")
+    command = native_extra.server_command(
+        config, benchmark, "task_1", tmp_path / "native", root, controller)
+    assert command[command.index("--tool-recovery") + 1] == "draft-full-raw"
+    assert "--tool-budget-tokens" not in command
+
+
 @pytest.mark.parametrize("arm,detector,ratio,model,variant", [
     ("c2kv_native_r4", "disabled", 4, "c2kv_native_r4", None),
     ("c2kv_c1_t02_r8", "t02_risk", 8, "c1_t02_risk", None),

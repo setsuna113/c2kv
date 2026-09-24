@@ -61,6 +61,27 @@ def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_p
     assert parsed.embedding_batch_size == 2
 
 
+@pytest.mark.parametrize("recovery", ["draft-full-raw", "always-full-raw"])
+def test_bfcl_tool_recovery_reaches_event_native_server_command(tmp_path, recovery):
+    config = json.loads(DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    config["sglang_source"] = str(tmp_path / "sglang")
+    config["bfcl_dir"] = str(tmp_path)
+    (tmp_path / "bfcl_eval").mkdir()
+    config.update(tool_memory="t0:r8:uniform:schema",
+                  tool_checkpoint=str(tmp_path / "T0"), tool_recovery=recovery)
+    delivery = paper_c1.load_delivery()
+    args = paper_c1.delivery_args(
+        config, "bfcl_base", tmp_path / "out", ["multi_turn_base_0"], delivery)
+    assert args.tool_recovery == recovery
+    controller = tmp_path / "controller.json"
+    controller.write_text("{}", encoding="utf-8")
+    server, _ = delivery.commands_for_task(args, "multi_turn_base_0", controller)
+    assert "event_native_server" in " ".join(server)
+    assert server[server.index("--tool-recovery") + 1] == recovery
+    assert server[server.index("--tool-memory") + 1] == "t0:r8:uniform:schema"
+    assert "--tool-budget-tokens" not in server
+
+
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
     config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     config["methods"] = [
@@ -589,11 +610,21 @@ def test_ace_tool_replay_accepts_explicit_empty_capture_before_server(tmp_path, 
 @pytest.mark.parametrize("alias", ["none", "raw", "full"])
 def test_explicit_off_tool_alias_restores_unmodified_native_config(alias):
     config = {"native_arm": "c2kv_c1_t02_r4", "tool_memory": "t0:r8",
-              "tool_checkpoint": "/old/T0", "tool_budget_tokens": 256}
+              "tool_checkpoint": "/old/T0", "tool_budget_tokens": 256,
+              "tool_recovery": "draft-full-raw"}
     paper_c1.apply_tool_cli(config, alias, "", None)
     assert config == {"native_arm": "c2kv_c1_t02_r4"}
     with pytest.raises(ValueError, match="active --tool-memory"):
         paper_c1.apply_tool_cli(config, alias, "/orphan/T0", None)
+
+
+def test_tool_recovery_cli_overrides_resolved_context_without_dropping_tool_memory():
+    config = {"tool_memory": "t0:r8:uniform:schema", "tool_checkpoint": "/T0"}
+    paper_c1.apply_tool_cli(config, "", "", None, "draft-full-raw")
+    assert config == {"tool_memory": "t0:r8:uniform:schema", "tool_checkpoint": "/T0",
+                      "tool_recovery": "draft-full-raw"}
+    with pytest.raises(ValueError, match="active --tool-memory"):
+        paper_c1.apply_tool_cli({}, "", "", None, "always-full-raw")
 
 
 def test_replay_distinguishes_failed_request_from_later_unattempted_prefix(tmp_path, monkeypatch):

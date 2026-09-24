@@ -151,6 +151,10 @@ class EventNativeDecisionRunner:
                 else:
                     reconsider_started = time.perf_counter_ns()
                     try:
+                        budget_observer = getattr(self.controller, 'observe_generation_budget', None)
+                        if callable(budget_observer):
+                            budget_observer(prepared, remaining_generation_calls=(
+                                self.max_generation_calls - self.generation_calls))
                         with self._capacity_scope(key, "regeneration"):
                             reconsidered = self.controller.reconsider(
                                 prepared, list(draft.tool_calls), draft_text=draft.text,
@@ -250,8 +254,19 @@ class EventNativeDecisionRunner:
                 if capacity is not None and not rounds:
                     record['exact_recovery'].update(
                         recovery_capacity=copy.deepcopy(capacity))
+                restore_commit = getattr(self.controller, 'restore_draft_commit', None)
+                restored_capacity_commit = False
+                if capacity_rejected and callable(restore_commit):
+                    restored_capacity_commit = restore_commit(
+                        prepared, list(draft.tool_calls), draft_text=draft.text,
+                        parse_error=draft.reason if draft.status == 'malformed' else None)
+                    if restored_capacity_commit:
+                        record['commit_restore'] = {
+                            'reason': 'recovery_capacity_rejected', 'selected_generation_index': 0,
+                            'restored_original_draft_proof': True}
                 commit_validator = getattr(self.controller, 'validate_commit', None)
-                if callable(commit_validator) and not recovery_disabled and not capacity_rejected:
+                if (callable(commit_validator) and not recovery_disabled
+                        and (not capacity_rejected or restored_capacity_commit)):
                     commit_started = time.perf_counter_ns()
                     verdict = commit_validator(
                         prepared, list(draft.tool_calls), draft_text=draft.text,
@@ -271,6 +286,13 @@ class EventNativeDecisionRunner:
                             final_memory = prepared.memory
                             record['generation_trace'][0]['discarded'] = False
                             record['commit_validation']['selected_generation_index'] = 0
+                            if callable(restore_commit) and restore_commit(
+                                    prepared, list(draft.tool_calls), draft_text=draft.text,
+                                    parse_error=draft.reason if draft.status == 'malformed' else None):
+                                record['commit_restore'] = {
+                                    'reason': 'selected_original_after_validation',
+                                    'selected_generation_index': 0,
+                                    'restored_original_draft_proof': True}
                         elif verdict['fallback'] == 'stop':
                             # No regenerated action was accepted. Retain the
                             # original view as the next decision's memory.
@@ -288,9 +310,11 @@ class EventNativeDecisionRunner:
                         else:
                             raise ValueError('Unknown source repair commit fallback')
                     else:
-                        record['commit_validation']['selected_generation_index'] = len(record['generation_trace']) - 1
+                        record['commit_validation']['selected_generation_index'] = (
+                            0 if restored_capacity_commit else len(record['generation_trace']) - 1)
                 finalize = getattr(self.controller, 'finalize_commit', None)
-                if (callable(finalize) and not recovery_disabled and not capacity_rejected
+                if (callable(finalize) and not recovery_disabled
+                        and (not capacity_rejected or restored_capacity_commit)
                         and draft.status != 'malformed'):
                     finalize_started = time.perf_counter_ns()
                     calls, receipt = finalize(prepared, draft.tool_calls)

@@ -40,7 +40,7 @@ def validate_tool_ready(config, manifest):
 
     validate_ready_tool_contract(
         manifest, config["tool_memory"], config.get("tool_checkpoint"),
-        config.get("tool_budget_tokens"))
+        config.get("tool_budget_tokens"), config.get("tool_recovery", "none"))
 
 
 def arm_identity(config):
@@ -387,6 +387,8 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
             command.extend(["--tool-checkpoint", str(Path(config["tool_checkpoint"]).resolve())])
         if config.get("tool_budget_tokens") is not None:
             command.extend(["--tool-budget-tokens", str(config["tool_budget_tokens"])])
+        if config.get("tool_recovery", "none") != "none":
+            command.extend(["--tool-recovery", config["tool_recovery"]])
     return command
 
 

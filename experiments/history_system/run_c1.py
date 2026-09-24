@@ -592,6 +592,8 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
             server.extend(["--tool-checkpoint", str(args.tool_checkpoint.resolve())])
         if args.tool_budget_tokens is not None:
             server.extend(["--tool-budget-tokens", str(args.tool_budget_tokens)])
+        if args.tool_recovery != "none":
+            server.extend(["--tool-recovery", args.tool_recovery])
     if getattr(args, "tool_schema", TOOL_SCHEMA_DEFAULT) != TOOL_SCHEMA_DEFAULT:
         # Explicit non-default prologue only; the release server command stays byte-identical.
         server.extend(["--tool-schema", args.tool_schema])
@@ -1252,7 +1254,8 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                 validate_ready_tool_contract(
                     json.loads(ready_path.read_text(encoding="utf-8")),
                     args.tool_memory, getattr(args, "tool_checkpoint", None),
-                    getattr(args, "tool_budget_tokens", None))
+                    getattr(args, "tool_budget_tokens", None),
+                    getattr(args, "tool_recovery", "none"))
             with (task_out / "benchmark.log").open("w", encoding="utf-8") as bench_log:
                 worker = subprocess.Popen(
                     worker_command, cwd=RUNTIME, env=worker_env, stdout=bench_log,
@@ -1375,6 +1378,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool-memory", default="none")
     parser.add_argument("--tool-checkpoint", type=Path)
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--tool-recovery", choices=("none", "draft-full-raw", "always-full-raw"),
+                        default="none")
     parser.add_argument("--tool-schema", choices=TOOL_SCHEMA_MODES, default=TOOL_SCHEMA_DEFAULT,
                         help="Native tool prologue: sglang-full (release default, matches Full) "
                              "or raw (client tool JSON unchanged)")
@@ -1413,7 +1418,8 @@ def validate_args(args: argparse.Namespace) -> list[str]:
         if not valid_policy_route:
             raise ValueError("RACER policy must use its unchanged native C1 policy factory")
     if args.tool_memory == "none":
-        if args.tool_checkpoint is not None or args.tool_budget_tokens is not None:
+        if (args.tool_checkpoint is not None or args.tool_budget_tokens is not None
+                or args.tool_recovery != "none"):
             raise ValueError("Tool options require --tool-memory")
     elif args.tool_memory.startswith("t0:"):
         if args.tool_checkpoint is None or not (args.tool_checkpoint / "config.json").is_file():
