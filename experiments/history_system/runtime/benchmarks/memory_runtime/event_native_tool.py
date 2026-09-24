@@ -566,9 +566,6 @@ class ToolRegionController:
         plan = self._plan(payload)
         if self.tool_recovery != "none" and plan is not None and plan.source_spans:
             raise ValueError("Tool recovery currently supports structured tool catalogs only")
-        if (self.tool_recovery != "none" and plan is not None
-                and payload["messages"][0].get("role") != "system"):
-            raise ValueError("Tool recovery requires an existing source system message")
         base = self.inner.prepare(
             self._controller_payload(payload, plan), ratio=ratio,
             max_new_tokens=max_new_tokens)
