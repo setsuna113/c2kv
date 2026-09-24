@@ -168,7 +168,8 @@ def main(argv=None):
     pool = [row for row in scored if row["extra_generation"]]
     n = len(scored)
     result = {"schema": "racer-ablation-utility-v1", "result_status": "preliminary, n=1",
-              "coverage": coverage, "states": rows, "probe_failures": probe_failures,
+              "coverage": coverage, "states": rows,
+              "probe_failures": {key: sorted(value) for key, value in probe_failures.items()},
               "consistency": {
                   "nonpool_delta_nonzero": sum(1 for row in scored
                                                if not row["extra_generation"] and row["delta"] != 0),
