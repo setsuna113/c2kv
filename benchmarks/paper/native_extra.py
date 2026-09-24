@@ -406,8 +406,22 @@ def _preflight_controller_tokenizer(python: str, checkpoint: str) -> None:
             f"from {checkpoint}: {(result.stderr or '').strip()[-1000:]}")
 
 
+def _native_agent_timeout(config, task_out):
+    """The agent client's read bound for one native decision; None keeps 600 s."""
+    if config.get("generation_timeout") is None:
+        return None
+    from benchmarks.adapters.generation_deadline import native_decision_client_timeout
+
+    ready = json.loads((task_out / "server" / "ready.json").read_text(encoding="utf-8"))
+    generations = (ready.get("route_contract") or {}).get("max_generations_per_decision", 1)
+    return native_decision_client_timeout(config["generation_timeout"], generations)
+
+
 def _run_official(config, benchmark, task, task_out, base_url, model):
     user_url = c1_appworld._sglang_upstream(config)
+    agent_timeout = (_native_agent_timeout(config, task_out)
+                     if benchmark in {"tau2", "toolsandbox"} else None)
+    timeout_kwargs = {} if agent_timeout is None else {"agent_timeout": agent_timeout}
     if benchmark == "tau2":
         from benchmarks.adapters.tau2_adapter import run_tau2
         from .tau2 import options
@@ -421,7 +435,7 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
             python=config.get("tau2_python", config["bench_python"]),
             run_name="paper_" + hashlib.sha256(str(task_out.resolve()).encode()).hexdigest()[:20],
             model=model, user_model=config["model"], native=True,
-            native_server_dir=task_out / "server", **settings,
+            native_server_dir=task_out / "server", **settings, **timeout_kwargs,
         )
         if summary.get("n") != 1 or summary.get("task_ids") != [task]:
             raise RuntimeError("Official tau2 did not score the frozen task")
@@ -469,7 +483,7 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
             scenarios=[task], benchmark_dir=Path(config["toolsandbox_dir"]),
             python=config.get("toolsandbox_python", config["bench_python"]),
             parallel=1, model=model, user_model=config["model"], expected=1,
-            native_server_dir=task_out / "server",
+            native_server_dir=task_out / "server", **timeout_kwargs,
         )
         if summary.get("n") != 1 or summary.get("scenario_ids") != [task]:
             raise RuntimeError("Official ToolSandbox did not score the frozen scenario")

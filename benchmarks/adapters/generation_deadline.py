@@ -26,3 +26,19 @@ def agent_client_timeout(generation_timeout: float) -> Optional[float]:
     if timeout == DEFAULT_GENERATION_TIMEOUT:
         return None
     return timeout + CLEANUP_HEADROOM
+
+
+def native_decision_client_timeout(generation_timeout: float,
+                                   max_generations: int) -> Optional[float]:
+    """Agent client timeout for a native C1/RACER server at this deadline.
+
+    One agent request is one server decision: controller work plus up to
+    ``max_generations`` generations, each bounded by the deadline (the rule of
+    the runtime's ``event_native_bfcl.decision_request_timeout``). ``None`` at
+    the default deadline keeps the harness's historical client timeout.
+    """
+    if agent_client_timeout(generation_timeout) is None:
+        return None
+    if type(max_generations) is not int or max_generations < 1:
+        raise ValueError("max_generations must be a positive integer")
+    return max_generations * float(generation_timeout) + CLEANUP_HEADROOM

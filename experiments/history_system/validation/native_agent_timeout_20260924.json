@@ -1,0 +1,27 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "Native tau2/ToolSandbox agent client timeout covers one whole server decision",
+  "base_revision": "paper 7247739 (engine 89c3895d7 unchanged)",
+  "incident": {
+    "cell": "tau2__racer_v2_commitkv_c1_v2_verified_b256 (box9 4090, paper 1afe5ff)",
+    "task": "1",
+    "observed": "tau2 termination infrastructure_error with litellm.Timeout. The longest recorded decision took 150 s, and every draft generation took 13-26 s. Controller time grew instead: prepare took 10-11 s per decision up to step-61, then 84-90 s from step-62, when the incumbent C1 allocation became capacity infeasible and the capacity-gated source allocation ran over 125-129 source messages. step-64's reconsider took 34 s. At step-66 the draft finished 18 s after submission, and no further engine request followed until tau2's 600 s agent timeout about 9 minutes later.",
+    "evidence": "box9 /workspace/results-p2tau5b9/closed_loop/tau2__racer_v2_commitkv_c1_v2_verified_b256.failed.1/native/task_shards/1 (read-only)"
+  },
+  "cause": "native_extra._run_official called run_tau2 and run_ts without agent_timeout, so on the native route the agent kept its 600 s client default even when the run configured a generation deadline. One agent request is one server decision (controller work plus up to max_generations_per_decision generations). The BFCL native client already reads for G x D + 90 s (event_native_bfcl.decision_request_timeout).",
+  "change": "generation_deadline.native_decision_client_timeout(D, G) = G x D + 90 s, None at the default deadline. native_extra passes it as agent_timeout to the tau2 and ToolSandbox native harnesses, with G taken from the task server's ready.json.",
+  "unchanged": [
+    "Without a configured generation_timeout, or at the 600 s default, the agent arguments and protocol receipts stay byte-identical.",
+    "An agent call that finished within 600 s behaves the same under the longer bound; only the tau2/ToolSandbox protocol receipt now records agent_timeout.",
+    "ACEBench exposes no agent client timeout and is not changed.",
+    "A tau2 infrastructure_error still ends the cell: it also reports genuine harness faults, so it is not converted into a scored task."
+  ],
+  "open": [
+    "The controller cost itself: capacity-gated source allocation re-measures candidates over the whole source archive, so per-decision prepare and reconsider grow with history length (90 s and over 9 minutes at about 130 source messages). With the longer client bound such a task keeps running and can take many hours; native tau2 has no task wall unless tau2_timeout is configured."
+  ],
+  "tests": {
+    "file": "benchmarks/paper/test_native_agent_timeout.py (5 new)",
+    "suites": "benchmarks, runtime memory_runtime and delivery suites have the same failure sets as 7247739"
+  }
+}
