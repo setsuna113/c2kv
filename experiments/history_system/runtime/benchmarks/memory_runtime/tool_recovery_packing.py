@@ -63,10 +63,18 @@ def rebuild_tool_history_memory(
         raise ValueError("Invalid ratio, completion length, or model context")
     session_id = source_payload["session_id"]
     source_messages = source_payload["messages"]
-    if not source_messages or source_messages[0].get("role") != "system":
-        raise ValueError("Tool re-rendering requires an existing source system message")
-    if len(old_rendered_messages) != len(source_messages) or len(new_rendered_messages) != len(source_messages):
+    if not source_messages:
+        raise ValueError("Tool re-rendering requires source messages")
+    # T0/schema writes its protocol into the leading system message and inserts
+    # one when the source has none (a BFCL task starts with the user request).
+    # Both plans then share that rendered frame, one index after the source.
+    inserted = 0 if source_messages[0].get("role") == "system" else 1
+    if (len(old_rendered_messages) != len(source_messages) + inserted
+            or len(new_rendered_messages) != len(old_rendered_messages)):
         raise ValueError("Tool re-rendering cannot change source message indices")
+    if inserted and any(messages[0].get("role") != "system"
+                        for messages in (old_rendered_messages, new_rendered_messages)):
+        raise ValueError("Tool re-rendering requires a leading protocol system message")
     resolved_benchmark = benchmark if benchmark is not None else source_payload.get("benchmark")
     source_store = EventStore.from_messages(session_id, source_messages, benchmark=resolved_benchmark)
     old_store = EventStore.from_messages(
@@ -77,13 +85,17 @@ def rebuild_tool_history_memory(
         session_id, RenderedMessages(new_rendered_messages, source=source_messages),
         benchmark=resolved_benchmark,
     )
-    if source_store.events != old_store.events or old_store.events != new_store.events:
+    # With an inserted protocol message the event indices of the rendered frame
+    # are shifted; the message-by-message check below binds them to the source.
+    if ((not inserted and source_store.events != old_store.events)
+            or old_store.events != new_store.events):
         raise ValueError("Tool re-rendering changed event or source identity")
-    for source, old, new in zip(
-        source_store.messages, old_store.messages, new_store.messages, strict=True,
-    ):
+    aligned = [(None, old_store.messages[0], new_store.messages[0])] if inserted else []
+    aligned += zip(source_store.messages, old_store.messages[inserted:],
+                   new_store.messages[inserted:], strict=True)
+    for source, old, new in aligned:
         source_message, old_message, new_message = (
-            source.to_dict(), old.to_dict(), new.to_dict(),
+            None if source is None else source.to_dict(), old.to_dict(), new.to_dict(),
         )
         if old_message["role"] != "system":
             if source_message != old_message or old_message != new_message:

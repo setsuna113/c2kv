@@ -250,3 +250,66 @@ def test_runner_restores_original_proof_only_when_it_selects_original_draft(tmp_
     assert record["commit_restore"]["selected_generation_index"] == 0
     assert record["commit_transform"]["changed"]
     assert binding.applied == 1
+
+
+def bfcl_payload():
+    """BFCL shape: tools in the request field and no source system message."""
+    data = payload()
+    data["messages"] = data["messages"][1:]
+    return data
+
+
+def test_bfcl_shaped_source_without_system_restores_only_the_inserted_protocol():
+    """box4 BFCL base: every task failed at decision 0 because the rebuild
+    required a source system message that BFCL never sends."""
+    outer, inner, tokenizer = wrapped()
+    data = bfcl_payload()
+    p = outer.prepare(data, ratio=8, max_new_tokens=32)
+    assert p.plan.messages[0]["role"] == "system"
+    assert len(p.plan.messages) == len(data["messages"]) + 1
+    calls = [call("displayCarStatus", {"option": "fuelLevel"})]
+    result = outer.reconsider(p, calls, draft_text="draft")
+    assert result["regenerate"]
+    receipt = result["decision"]["tool_recovery"]
+    assert (receipt["reason"], receipt["status"]) == ("called_tool_document_compressed", "restored")
+    initial = tokenizer.decode(p.memory.system_input_ids)
+    restored = tokenizer.decode(result["memory"].system_input_ids)
+    assert "never fuelLevel" not in initial and "never fuelLevel" in restored
+    assert result["memory"].view == p.inner.memory.view
+    assert result["memory"].workspace_input_ids == p.inner.memory.workspace_input_ids
+    assert history_budget_receipt(result["memory"], result["metadata"], outer,
+                                  ratio=8, phase="regeneration")["status"] == "passed"
+    assert inner._recovery_counts[p.source_payload["session_id"]] == 1
+
+
+def test_bfcl_shaped_source_rejects_a_replacement_frame_without_the_protocol():
+    from benchmarks.memory_runtime.tool_recovery_packing import rebuild_tool_history_memory
+
+    outer, _, tokenizer = wrapped()
+    data = bfcl_payload()
+    p = outer.prepare(data, ratio=8, max_new_tokens=32)
+    with pytest.raises(ValueError, match="source message indices"):
+        rebuild_tool_history_memory(
+            tokenizer, p.inner.memory, p.inner.metadata, p.source_payload,
+            p.plan.messages, list(data["messages"]), ratio=8, max_new_tokens=32,
+            model_context=50000)
+
+
+def test_bfcl_shaped_runner_draft_and_tool_regeneration(tmp_path, monkeypatch):
+    tokenizer = CharacterTokenizer()
+    inner = factory_controller(monkeypatch, tokenizer=tokenizer)
+    first = '<tool_call>{"name":"displayCarStatus","arguments":{"option":"fuelLevel"}}</tool_call>'
+    corrected = '<tool_call>{"name":"displayCarStatus","arguments":{"option":"fuel"}}</tool_call>'
+    generator = TextGenerator([first, corrected])
+    outer = ToolRegionController(inner, tokenizer, parse_native_tool_spec("t0:r8:uniform:schema"),
+                                 model_context=50000, generator=generator, tool_recovery="draft-full-raw")
+    runner = EventNativeDecisionRunner(outer, generator, tokenizer, ratio=8,
+        max_new_tokens=32, max_generation_calls=2,
+        journal=AttemptJournal(tmp_path / "attempts.jsonl"))
+    record = runner.run(bfcl_payload())
+    assert record["status"] == "ok"
+    assert record["generation_completed"] == 2
+    assert record["exact_recovery"]["tool_recovery"]["status"] == "restored"
+    import json
+    arguments = record["response"]["tool_calls"][0]["function"]["arguments"]
+    assert (json.loads(arguments) if isinstance(arguments, str) else arguments) == {"option": "fuel"}
