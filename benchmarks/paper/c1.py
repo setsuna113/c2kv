@@ -221,6 +221,8 @@ def method_label():
     if is_racer_arm(ARM):
         backend, policy, budget, mode = parse_racer_arm_identity(ARM)
         if mode is not None:
+            if mode.startswith("protection_"):
+                return f"RACER v3 {backend} {policy} {mode} b{budget}"
             label = "bare" if mode == "bare" else f"{policy} {mode}"
             return f"RACER v2 {backend} {label} b{budget}"
         return f"RACER {backend} {policy} b{budget}"

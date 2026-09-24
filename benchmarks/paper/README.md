@@ -972,6 +972,47 @@ Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 
 # RACER backend/policy matrix
 
+New paper overlays use `racer-backend-v3`. The `policy` and `extra_protection`
+fields are independent: `--racer-policies c1_v2_verified --racer-protection off,on`
+creates `racer_v3_<backend>_c1_v2_verified_protection_off_bB` and
+`racer_v3_<backend>_c1_v2_verified_protection_on_bB` at the same absolute B.
+Both cells run the unchanged C1 v2 recovery policy. `policy=off` with
+`extra_protection=off` is the native persistent backend without extra RACER
+protection; C2KV retains its intrinsic S0. The `c2kv_native_r8_bB` bare arm is
+separate. For C2KV, both v3 protection flags preserve that same intrinsic S0,
+so this flag pair does not compare distinct initial protection algorithms.
+StreamingLLM already retains the latest B tokens; its extra protection adapter
+has no additional effect when the requested source is older than that window.
+
+With protection off, native backends use the v1 allocator and the same recovery
+policy. With protection on, the allocator names historical source messages
+(instructions, incomplete events, the latest user/tool event, and lexical
+source candidates; AppWorld also retains its first-user anchor). It adds no
+JSON evidence, prompt tokens, or implicit source re-prefill. The engine pins
+original positions only when the entire request is resident and fits every
+affected selection row, including the backend's existing mandatory positions.
+Otherwise it returns the original native selection with a reason in the
+`racer_native_protection` receipt. Full history and already-retained requests
+also leave the native selection unchanged.
+
+| Backend | Protection admission and replacement rule |
+| --- | --- |
+| H2O | Keep its recent quota; replace the lowest cumulative-score optional positions. |
+| SnapKV | Keep its recent window; replace the lowest pooled-score optional positions. |
+| PyramidKV | Keep each layer/head's realized budget and recent window; replace optional positions using that row's pooled scores. |
+| AgentKV | Keep its sink/recent positions; replace optional positions using the same Stage-Q scores. |
+| CommitKV | Keep pending positions, reject retired sources, and replace the oldest optional positions under its latest-first selector. |
+| StreamingLLM | Keep the existing recent-only selection; report `native_recent_only`. |
+| C2KV | Preserve intrinsic S0 in both flag settings; report `intrinsic_c2kv_s0_preserved`. |
+
+Protection applies to selections within the draft. Regeneration remains under
+the existing RACER recovery transaction, and the next decision receives its
+own request. CPU compatibility and selection tests validate these mechanics;
+they do not establish an accuracy gain over protection off.
+
+Use `--racer-schema v2` to generate the historical three-mode overlay below.
+Frozen v1/v2 configs and result identities retain their original meaning.
+
 The v2 matrix separates three modes at the same absolute budget, benchmark
 scope and tool context:
 
@@ -1006,12 +1047,14 @@ B=768  # Example; choose the absolute token cap for this run.
 python -m benchmarks.paper.runner prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
   --racer-backends c2kv,commitkv,agentkv,h2o,snapkv,pyramidkv,streamingllm \
-  --racer-policies t02,pending_verified --history-kv-budget-tokens "$B" \
+  --racer-policies c1_v2_verified --racer-protection off,on \
+  --history-kv-budget-tokens "$B" \
   --tool-contexts t0_r8
 python -m benchmarks.paper.runner run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
   --racer-backends c2kv,commitkv,agentkv,h2o,snapkv,pyramidkv,streamingllm \
-  --racer-policies t02,pending_verified --history-kv-budget-tokens "$B" \
+  --racer-policies c1_v2_verified --racer-protection off,on \
+  --history-kv-budget-tokens "$B" \
   --tool-contexts t0_r8 --stage closed_loop --cells CELL_ID
 ```
 
@@ -1024,7 +1067,7 @@ view. Persistent KV backends similarly operate on retained KV plus new input.
 Full source transcripts remain available for audit and explicit recovery.
 
 StreamingLLM uses the registered `history_kv_streamingllm_r25_persistent`
-source arm, resolved to `racer_v2_streamingllm_bare_bB` in new marked configs. Legacy
+source arm, resolved to `racer_v2_streamingllm_bare_bB` in historical v2 overlays. Legacy
 StreamingLLM IDs, including the b128/b192/b256 cells, remain distinct; their
 existing results are not relabeled as v2 results.
 

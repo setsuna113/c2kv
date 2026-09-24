@@ -18,7 +18,7 @@ from .candidate_matrix import (
     native_budget_benchmarks, parse_candidate_arms, with_candidate_methods,
 )
 from .racer_matrix import (
-    is_racer_arm, parse_racer_backends, parse_racer_policies,
+    is_racer_arm, parse_racer_backends, parse_racer_policies, parse_racer_protections,
     racer_v2_arm_name, racer_config_for_arm, resolve_racer_backend,
     resolve_unified_runtime_methods, unified_backend_for_arm, with_racer_methods,
 )
@@ -151,6 +151,8 @@ def cells(config):
                             recovery_policy=("off" if resolved.get("mode") in
                                              {"bare", "protected_off"} else resolved["policy"]),
                             **({"racer_mode": resolved["mode"]} if "mode" in resolved else {}),
+                            **({"extra_protection": resolved["extra_protection"]}
+                               if "extra_protection" in resolved else {}),
                             calibration_status=resolved["detector_calibration"],
                             history_allocation=resolved["allocation"],
                         )
@@ -842,6 +844,8 @@ def _prepare_locked(config, output, source):
         if any(is_racer_arm(row["arm"]) for row in matrix):
             fields.extend(["history_backend", "racer_mode", "racer_policy", "calibration_status",
                            "history_allocation"])
+        if any("extra_protection" in row for row in matrix):
+            fields.append("extra_protection")
         if any("tool_schema" in row for row in matrix):
             fields.append("tool_schema")
         if any(is_subset(row) for row in matrix):
@@ -1294,8 +1298,11 @@ def main(argv=None):
                         help="opt-in RACER history backends: all or comma-separated "
                              "c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm")
     parser.add_argument("--racer-policies", default="",
-                        help="opt-in RACER policies: all or comma-separated off,t02,"
-                             "and exact candidate variant names; on policies add their paired off cell")
+                        help="opt-in RACER policies: all or comma-separated exact policy names")
+    parser.add_argument("--racer-protection", default="off,on",
+                        help="v3 extra protection values: off,on (default) or one value")
+    parser.add_argument("--racer-schema", choices=("v3", "v2"), default="v3",
+                        help="v3 independent policy/protection axes (default); v2 frozen historical overlay")
     parser.add_argument("--racer-history-budget", type=int,
                         help="explicit positive history-token budget shared by selected RACER cells")
     parser.add_argument("--acon-budget-tokens", type=int,
@@ -1343,13 +1350,18 @@ def main(argv=None):
             config, parse_candidate_arms(args.candidate_arms),
             tuple(args.candidate_benchmarks.split(",")))
         racer_backends = parse_racer_backends(args.racer_backends)
-        racer_policies = parse_racer_policies(args.racer_policies)
+        racer_policies = parse_racer_policies(
+            args.racer_policies, paired_off=args.racer_schema == "v2")
+        racer_protections = parse_racer_protections(args.racer_protection)
+        if args.racer_schema == "v2" and args.racer_protection != "off,on":
+            parser.error("--racer-protection applies only to --racer-schema v3")
         racer_budget = args.racer_history_budget
         if racer_backends or racer_policies:
             racer_budget = (racer_budget if racer_budget is not None else
                             config.get("history_kv_budget_tokens"))
         config = with_racer_methods(
-            config, racer_backends, racer_policies, racer_budget)
+            config, racer_backends, racer_policies, racer_budget,
+            protections=racer_protections if args.racer_schema == "v3" else None)
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:

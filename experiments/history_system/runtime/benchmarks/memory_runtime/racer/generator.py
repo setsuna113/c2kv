@@ -435,6 +435,13 @@ class PersistentRacerGenerator:
                                            for index in memory.initial_s0_source_indices],
                 "protected_evidence": bool(evidence),
             }
+        if getattr(self.config, "extra_protection", None) == "on" and phase == "draft":
+            persistent["extra_protection"] = {
+                "schema": "racer-native-protection-v1", "enabled": True,
+                "event_ids": list(memory.protection_event_ids),
+                "source_message_indices": [index_map[self._source_positions[index]]
+                                           for index in memory.protection_source_indices],
+            }
         persistent["transaction"] = transaction
         persistent["history_budget_tokens"] = self.config.history_budget_tokens
         persistent["native_evidence_tokens"] = memory.recovery_tokens
@@ -624,6 +631,15 @@ class PersistentRacerGenerator:
                     or type(initial.get("evidence_tokens")) is not int
                     or initial["evidence_tokens"] < 0):
                 raise SGLangEventNativeError("Missing verified RACER initial protection receipt")
+        if getattr(self.config, "extra_protection", None) == "on" and context.get("phase") == "draft":
+            protection = report.get("racer_native_protection") or {}
+            if (protection.get("schema") != "racer-native-protection-v1"
+                    or protection.get("decision_id") != context["decision_key"]
+                    or protection.get("event_ids") != list(memory.protection_event_ids)
+                    or type(protection.get("applied")) is not bool
+                    or not isinstance(protection.get("status"), str)
+                    or not protection["status"]):
+                raise SGLangEventNativeError("Missing verified RACER native protection receipt")
         generation = metadata.get("racer_generation") or {}
         ids = generation.get("output_token_ids")
         logprobs = generation.get("output_token_logprobs")

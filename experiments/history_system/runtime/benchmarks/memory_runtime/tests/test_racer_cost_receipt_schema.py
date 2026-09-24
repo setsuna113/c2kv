@@ -42,12 +42,12 @@ def _trace(receipt):
                 "racer_accounting": dict(ACCOUNTING)}}}
 
 
-@pytest.mark.parametrize("schema", ["racer-backend-v1", "racer-backend-v2"])
-def test_served_usage_binds_frozen_v1_and_current_v2_receipts(schema):
+@pytest.mark.parametrize("schema", ["racer-backend-v1", "racer-backend-v2", "racer-backend-v3"])
+def test_served_usage_binds_supported_receipts(schema):
     assert _racer_served_usage(_trace(dict(V2_RECEIPT, schema=schema)), label="trace") == USAGE
 
 
-@pytest.mark.parametrize("receipt", [dict(V2_RECEIPT, schema="racer-backend-v3"),
+@pytest.mark.parametrize("receipt", [dict(V2_RECEIPT, schema="racer-backend-v999"),
                                      None, "racer-backend-v2"])
 def test_served_usage_still_rejects_unknown_receipts(receipt):
     with pytest.raises(ValueError, match="racer_backend is invalid"):

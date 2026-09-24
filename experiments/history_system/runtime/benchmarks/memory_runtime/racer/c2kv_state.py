@@ -51,6 +51,9 @@ class C2KVResidentPolicy:
             "initial_allocation": "configured_c2kv_policy",
             "initial_policy_route": initial_policy_route,
             "previous_source_message_count": resident.source_message_count if resident else 0,
+            **({"extra_protection": self.backend.extra_protection,
+                "extra_protection_status": "intrinsic_c2kv_s0_preserved"}
+               if self.backend.schema == "racer-backend-v3" else {}),
             **admission,
         }
 

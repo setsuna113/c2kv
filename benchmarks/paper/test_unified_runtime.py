@@ -207,6 +207,7 @@ def test_default_prepare_uses_one_global_b_without_duplicate_off(tmp_path):
         "--sglang-source", str(tmp_path / "engine"),
         "--racer-backends", "c2kv,h2o,streamingllm",
         "--racer-policies", "pending_verified",
+        "--racer-schema", "v2",
     ])
     config = json.loads((output / "config.resolved.json").read_text(encoding="utf-8"))
     methods = config["methods"]
@@ -275,6 +276,46 @@ def test_native_extra_ready_binds_exact_racer_backend_and_controller(tmp_path, b
     path.write_text(json.dumps(ready), encoding="utf-8")
     with pytest.raises(RuntimeError, match="RACER backend identity"):
         native_extra.validate_ready_manifest(config, benchmark, "task_1", path, controller)
+
+
+def test_native_extra_ready_binds_v3_protection_identity(tmp_path):
+    config = with_racer_methods(resolve_unified_runtime_methods(unified_config()),
+                                ("agentkv",), ("c1_v2_verified",), 384,
+                                protections=("off", "on"))
+    config["native_arm"] = "racer_v3_agentkv_c1_v2_verified_protection_off_b384"
+    identity = native_extra.arm_identity(config)
+    racer = identity["racer_backend"]
+    controller = tmp_path / "controller.json"
+    controller_data = {"racer_backend": racer,
+                       "candidate_algorithm": {"variant": "c1_v2_verified"}}
+    controller.write_text(json.dumps(controller_data), encoding="utf-8")
+    receipt_identity = "racer:v3:agentkv:c1_v2_verified:protection_off:b384"
+    ready = {
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "tau2", "source_profile": native_extra.BENCHMARKS["tau2"][1],
+        "allowed_task_ids": ["task_1"], "model_name": identity["model_name"],
+        "view_mode": "ac_native_s0_lexical_raw_reserve_failed_operation",
+        "ratio": identity["ratio"], "generation_backend": "sglang",
+        "s0_controller_contract": {
+            "source": str(controller.resolve()),
+            "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
+            "config": controller_data,
+        },
+        "racer_backend": dict(racer, identity=receipt_identity, quality_validated=False),
+        "route_contract": {
+            "baseline_identity": receipt_identity,
+            "history_allocation": "backend_native_persistent", "recovery_enabled": True,
+        },
+        "candidate_algorithm": {"variant": "c1_v2_verified"},
+    }
+    path = tmp_path / "ready.json"
+    path.write_text(json.dumps(ready), encoding="utf-8")
+    native_extra.validate_ready_manifest(config, "tau2", "task_1", path, controller)
+    ready["route_contract"]["baseline_identity"] = receipt_identity.replace(
+        "protection_off", "protection_on")
+    path.write_text(json.dumps(ready), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="RACER backend identity"):
+        native_extra.validate_ready_manifest(config, "tau2", "task_1", path, controller)
 
 
 def test_native_budget_helper_uses_racer_arm_b_and_materializes_once(tmp_path, monkeypatch):

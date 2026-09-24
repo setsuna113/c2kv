@@ -15,7 +15,7 @@ from benchmarks.history_budget import parse_history_kv_budget
 from . import runner
 from .artifact_io import atomic_json
 from .process_lifecycle import run_owned, unwind_on_termination
-from .racer_matrix import racer_v2_arm_name, unified_backend_for_arm
+from .racer_matrix import is_racer_arm, racer_v2_arm_name, unified_backend_for_arm
 
 
 PAPER_ROOT = Path(__file__).resolve().parents[2]
@@ -55,7 +55,8 @@ def plan(config: dict, benchmark: str, budget_spec: str, output: Path,
         config = dict(config, history_kv_budget_tokens=tokens)
     config = runner.resolve_history_kv_budgets(config)
     selected_arm = (racer_v2_arm_name(marked[0]["history_backend"], "off", tokens, "bare")
-                    if marked and marked[0]["history_backend"] != "c2kv" else arm)
+                    if marked and marked[0]["history_backend"] != "c2kv"
+                    and not is_racer_arm(arm) else arm)
     existing = [method for method in config["methods"]
                 if method["arm"] == selected_arm and method.get("history_budget_tokens") == tokens]
     resolved = config if existing else runner.with_history_kv_budget(config, arm, tokens)

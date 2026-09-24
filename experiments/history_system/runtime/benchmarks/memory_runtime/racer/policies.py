@@ -19,7 +19,11 @@ def build_controller(tokenizer, *, config, packing, policy, model_context, bench
     if backend.allocation == "racer_s0":
         return _build_shared_initial_controller(tokenizer, config=config, backend=backend,
             packing=packing, policy=policy, model_context=model_context, benchmark=benchmark)
-    base = PersistentHistoryAllocator(tokenizer, backend_config=backend,
+    allocator_type = PersistentHistoryAllocator
+    if backend.extra_protection == "on":
+        from .native_protection import NativeProtectionAllocator
+        allocator_type = NativeProtectionAllocator
+    base = allocator_type(tokenizer, backend_config=backend,
         packing=packing, policy=policy, model_context=model_context, benchmark=benchmark,
         s0_config={key: value for key, value in config.items() if key in S0_CONFIG_DEFAULTS} or None)
     if backend.policy == "off":

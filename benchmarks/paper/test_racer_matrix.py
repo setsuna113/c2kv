@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -16,8 +17,9 @@ from benchmarks.paper import c1, runner
 from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM
 from benchmarks.paper.racer_matrix import (
     RACER_BACKENDS, RACER_POLICIES, parse_racer_arm_name, parse_racer_arm_identity,
-    racer_v2_arm_name, racer_config_for_arm,
-    parse_racer_backends, parse_racer_policies, resolve_racer_backend,
+    racer_v2_arm_name, racer_v3_arm_name, racer_config_for_arm,
+    parse_racer_backends, parse_racer_policies, parse_racer_protections,
+    resolve_racer_backend, validate_racer_backend,
     with_racer_methods,
 )
 
@@ -128,15 +130,23 @@ def test_prepare_and_cli_route_racer_through_native_c1_without_ratio_budget_alia
     runner.main([
         "prepare", "--config", str(config_path), "--history-kv-budget-tokens", "768",
         "--output", str(output), "--sglang-source", str(tmp_path / "engine"),
-        "--racer-backends", "h2o", "--racer-policies", "pending_verified",
+        "--racer-backends", "h2o", "--racer-policies", "c1_v2_verified",
         "--racer-history-budget", "512", "--tool-contexts", "t0_r8",
     ])
     resolved = json.loads((output / "config.resolved.json").read_text(encoding="utf-8"))
     methods = [method for method in resolved["methods"] if method.get("group") == "racer"]
-    assert [method["racer_backend"]["mode"] for method in methods] == [
-        "bare", "protected_off", "protected_off", "on"]
+    assert [method["racer_backend"]["extra_protection"] for method in methods] == [
+        "off", "on"]
+    assert {method["racer_backend"]["policy"] for method in methods} == {
+        "c1_v2_verified"}
+    assert all(method["recovery_policy"] == "c1_v2_verified" for method in methods)
+    with (output / "matrix.csv").open(encoding="utf-8", newline="") as stream:
+        matrix = [row for row in csv.DictReader(stream) if row["group"] == "racer"]
+    assert {row["extra_protection"] for row in matrix} == {"off", "on"}
+    assert {row["recovery_policy"] for row in matrix} == {"c1_v2_verified"}
     plan = json.loads((output / "commands.json").read_text(encoding="utf-8"))
-    cells = [row for row in plan if row["arm"] == "racer_v2_h2o_pending_verified_b512"]
+    cells = [row for row in plan if row["arm"] ==
+             "racer_v3_h2o_c1_v2_verified_protection_on_b512"]
     assert {row["tool_context"] for row in cells} == {"raw", "t0_r8"}
     raw = next(row for row in cells
                if row["benchmark"] == "bfcl_base" and row["tool_context"] == "raw")
@@ -144,6 +154,30 @@ def test_prepare_and_cli_route_racer_through_native_c1_without_ratio_budget_alia
     assert "--history-budget-tokens" not in raw["command"]
     assert raw["history_budget_tokens"] == 512
     assert "ratio" not in raw
+
+
+def test_paper_cli_exposes_independent_racer_axes(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        runner.main(["--help"])
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--racer-protection" in help_text
+    assert "--racer-schema" in help_text
+
+
+@pytest.mark.parametrize("protection", ["off", "on"])
+def test_single_cell_client_keeps_explicit_v3_policy_and_protection(tmp_path, protection):
+    from benchmarks.paper import history_kv_client
+
+    config = with_racer_methods(base_config(), ("h2o",), ("c1_v2_verified",),
+                                256, protections=("off", "on"))
+    arm = racer_v3_arm_name("h2o", "c1_v2_verified", 256, protection)
+    _, cell, command, _ = history_kv_client.plan(
+        config, "bfcl_base", f"{arm}=256", tmp_path, "http://localhost:36200")
+    assert cell["arm"] == arm
+    assert cell["extra_protection"] == protection
+    assert cell["recovery_policy"] == "c1_v2_verified"
+    assert command[command.index("--arm") + 1] == arm
 
 
 @pytest.mark.parametrize("policy,method,candidate,detector", [
@@ -236,6 +270,148 @@ def test_v2_identity_and_legacy_v1_cell_remain_distinct():
     assert next(row for row in resolved["methods"] if row["arm"] == legacy["arm"]) == legacy
     assert racer_config_for_arm(resolved, protected) == resolve_racer_backend(
         "h2o", "c1_v2_verified", 256, mode="protected_off")
+
+
+def test_v3_protection_pair_keeps_recovery_policy_and_native_allocation():
+    assert parse_racer_policies("c1_v2_verified", paired_off=False) == ("c1_v2_verified",)
+    assert parse_racer_protections("off,on") == ("off", "on")
+    config = with_racer_methods(base_config(), ("c2kv", "h2o"),
+                                ("c1_v2_verified",), 256,
+                                protections=("off", "on"))
+    for backend in ("c2kv", "h2o"):
+        pair = []
+        for protection in ("off", "on"):
+            arm = racer_v3_arm_name(backend, "c1_v2_verified", 256, protection)
+            assert parse_racer_arm_identity(arm) == (
+                backend, "c1_v2_verified", 256, f"protection_{protection}")
+            resolved = racer_config_for_arm(config, arm)
+            assert resolved == validate_racer_backend(resolved)
+            assert resolved["schema"] == "racer-backend-v3"
+            assert "mode" not in resolved
+            assert resolved["allocation"] == (
+                "c2kv_s0" if backend == "c2kv" else "backend_native_persistent")
+            method = next(row for row in config["methods"] if row["arm"] == arm)
+            assert method["recovery_policy"] == "c1_v2_verified"
+            pair.append(resolved)
+        assert {key: value for key, value in pair[0].items()
+                if key != "extra_protection"} == {
+                    key: value for key, value in pair[1].items()
+                    if key != "extra_protection"}
+
+
+def test_v3_off_off_is_native_and_v2_protected_off_stays_historical():
+    config = with_racer_methods(base_config(), ("h2o",), ("off",), 256,
+                                protections=("off", "on"))
+    arm = racer_v3_arm_name("h2o", "off", 256, "off")
+    assert racer_config_for_arm(config, arm)["allocation"] == "backend_native_persistent"
+    assert racer_config_for_arm(config, arm)["policy"] == "off"
+    with pytest.raises(ValueError, match="arm identity differs"):
+        invalid = copy.deepcopy(config)
+        next(row for row in invalid["methods"] if row["arm"] == arm)[
+            "racer_backend"]["extra_protection"] = "on"
+        racer_config_for_arm(invalid, arm)
+    with pytest.raises(ValueError, match="recovery policy differs"):
+        invalid = copy.deepcopy(config)
+        next(row for row in invalid["methods"] if row["arm"] == arm)[
+            "recovery_policy"] = "c1_v2_verified"
+        racer_config_for_arm(invalid, arm)
+    assert resolve_racer_backend("h2o", "off", 256,
+                                 mode="protected_off")["allocation"] == "racer_s0"
+
+
+def test_v3_c2kv_off_overlay_is_idempotent_without_bare_racer_arm():
+    config = with_racer_methods(base_config(), ("c2kv",), ("off",), 256,
+                                protections=("off", "on"))
+    assert with_racer_methods(config, ("c2kv",), ("off",), 256,
+                              protections=("off", "on")) == config
+    assert {row["arm"] for row in config["methods"] if row.get("group") == "racer"} == {
+        "racer_v3_c2kv_off_protection_off_b256",
+        "racer_v3_c2kv_off_protection_on_b256",
+    }
+
+
+def test_v3_paper_delivery_keeps_same_c1_policy_for_both_flags(tmp_path, monkeypatch):
+    config = with_racer_methods(base_config(), ("h2o",), ("c1_v2_verified",), 256,
+                                protections=("off", "on"))
+    config["sglang_source"] = str(tmp_path / "engine")
+    previous = c1.ARM
+    try:
+        for protection in ("off", "on"):
+            arm = racer_v3_arm_name("h2o", "c1_v2_verified", 256, protection)
+            c1.select_arm(arm)
+            delivery = c1.load_delivery()
+            args = c1.delivery_args(config, "bfcl_base", tmp_path / protection, [], delivery)
+            assert args.method == "proposed"
+            assert args.candidate_algorithm == "c1_v2_verified"
+            assert args.racer_backend_config == resolve_racer_backend(
+                "h2o", "c1_v2_verified", 256, extra_protection=protection)
+            assert delivery.validate_racer_backend(args.racer_backend_config) == (
+                args.racer_backend_config)
+            monkeypatch.setattr(delivery, "_build_profile_unbudgeted",
+                                lambda _args: ({"policy_config": "c1_v2_verified"},
+                                               {"ratio": 8}))
+            monkeypatch.setattr(delivery, "_history_budget_override", lambda _args: None)
+            _, profile = delivery.build_profile(SimpleNamespace(
+                racer_backend_config=args.racer_backend_config,
+                history_budget_tokens=None,
+            ))
+            assert profile["composition_identity"] == arm
+    finally:
+        c1.select_arm(previous)
+
+
+def test_v3_functional_receipt_requires_matching_protection_identity():
+    delivery = c1.load_delivery()
+    racer = resolve_racer_backend("h2o", "c1_v2_verified", 256,
+                                  extra_protection="off")
+    identity = "racer:v3:h2o:c1_v2_verified:protection_off:b256"
+    telemetry = {
+        "risk_detector_scores": 1, "risk_detector_unavailable": 0,
+        "candidate_decisions": 1, "decision_count": 1,
+        "candidate_variants": ["c1_v2_verified"],
+        "candidate_stable_call_ids": True, "candidate_budget_passed": True,
+        "racer_backend_receipt": dict(racer, identity=identity),
+        "racer_backend_identity": identity, "racer_observed_identities": [identity],
+        "racer_effective_budget_match": True,
+        "racer_generation_receipts": 1, "generation_calls": 1,
+        "racer_actual_generation_count": 1, "racer_accounting_passed": True,
+        "racer_generation_backend_match": True, "racer_transactions_complete": True,
+        "racer_transaction_receipts": 1, "racer_actual_cost_complete": True,
+        "native_packing_present": False, "gist_cache_hits": 0,
+        "compression_ratio": None,
+    }
+    required = delivery.functional_checks(
+        "proposed", "disabled", telemetry, candidate_algorithm="c1_v2_verified",
+        racer_backend=racer)["required"]
+    assert all(required.values())
+    assert "no_recovery" not in required
+    mismatched = dict(telemetry, racer_backend_identity=identity.replace(
+        "protection_off", "protection_on"))
+    required = delivery.functional_checks(
+        "proposed", "disabled", mismatched, candidate_algorithm="c1_v2_verified",
+        racer_backend=racer)["required"]
+    assert required["racer_backend_identity"] is False
+
+
+@pytest.mark.parametrize("protection", ["off", "on"])
+def test_v3_recovery_off_checks_are_independent_from_protection(protection):
+    delivery = c1.load_delivery()
+    racer = resolve_racer_backend("h2o", "off", 256,
+                                  extra_protection=protection)
+    telemetry = {
+        "native_packing_present": False, "gist_cache_hits": 0,
+        "compression_ratio": None, "generation_calls": 1,
+        "decision_count": 1, "recovery_count": 0,
+    }
+    required = delivery.functional_checks(
+        "c2kv_only", "disabled", telemetry, racer_backend=racer)["required"]
+    assert required["no_recovery"] is True
+    assert required["one_generation_per_decision"] is True
+    failed = dict(telemetry, recovery_count=1, generation_calls=2)
+    required = delivery.functional_checks(
+        "c2kv_only", "disabled", failed, racer_backend=racer)["required"]
+    assert required["no_recovery"] is False
+    assert required["one_generation_per_decision"] is False
 
 
 def test_racer_budget_override_applies_to_every_portable_benchmark(tmp_path, monkeypatch):
