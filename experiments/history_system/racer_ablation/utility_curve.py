@@ -96,7 +96,67 @@ def auc_ap(scores, labels):
     return float(auroc), ap
 
 
+def add_curves(result, light_available):
+    """Curves, task-bootstrap bands, transitions and AUROC/AP from the scored states."""
+    rows = result["states"]
+    scored = [row for row in rows if row["status"] == "scored"]
+    pool = [row for row in scored if row["extra_generation"]]
+    n = len(scored)
+    if not n:
+        return result
+    delta = [row["delta"] for row in pool]
+    orders = {"full": [row["full_score"] for row in pool]}
+    if light_available:
+        orders["light"] = [row["light_score"] for row in pool]
+    curves = {name: (curve(delta, scores) / n).tolist() for name, scores in orders.items()}
+    curves["random_expected"] = [k * sum(delta) / (len(pool) * n) if pool else 0.0
+                                 for k in range(len(pool) + 1)]
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    bands = {name: [] for name in (*orders, "random_expected")}
+    for _ in range(BOOTSTRAP):
+        sample = [scored[i] for i in rng.integers(0, n, n)]
+        sub = [row for row in sample if row["extra_generation"]]
+        d = [row["delta"] for row in sub]
+        for name in orders:
+            key = "full_score" if name == "full" else "light_score"
+            bands[name].append(at_grid(curve(d, [row[key] for row in sub]), n))
+        bands["random_expected"].append(at_grid(
+            np.array([k * sum(d) / len(sub) if sub else 0.0 for k in range(len(sub) + 1)]), n))
+    result["curves"] = {"x": [k / n for k in range(len(pool) + 1)], **curves}
+    result["bands"] = {"grid": GRID.tolist(), **{
+        name: {"lo": np.nanpercentile(np.stack(values), 2.5, axis=0).tolist(),
+               "hi": np.nanpercentile(np.stack(values), 97.5, axis=0).tolist()}
+        for name, values in bands.items()}}
+    result["transitions"] = {
+        scope: {f"{a}->{b}": sum(1 for row in rows_ if (row["y0"], row["yr"]) == (a, b))
+                for a in (False, True) for b in (False, True)}
+        for scope, rows_ in (("pool", pool), ("all_scored", scored))}
+    risk_labels = [int(not row["y0"]) for row in scored]
+    result["supplement_auroc_ap_on_y0_failure"] = {
+        name: dict(zip(("auroc", "ap"), auc_ap([row[key] for row in scored], risk_labels)))
+        for name, key in (("full", "full_score"), ("light", "light_score")) if name in orders}
+    result["n"], result["pool"] = n, len(pool)
+    result["always_endpoint"] = sum(delta) / n
+    return result
+
+
+def add_light(utility_path, light_path, out_path):
+    """Score the frozen states with a refit light detector; no run artifacts needed."""
+    result = json.load(open(utility_path, encoding="utf-8"))
+    light = json.load(open(light_path, encoding="utf-8"))
+    for row in result["states"]:
+        if row.get("light_features") is not None:
+            row["light_score"] = light_score(light, row["light_features"])
+    result["light_detector"] = {"path": light_path, "fit": light.get("fit"),
+                                "pipeline_check": light.get("pipeline_check")}
+    write_json(out_path, add_curves(result, True))
+
+
 def main(argv=None):
+    import sys
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--add-light":
+        return add_light(*argv[1:4])
     parser = argparse.ArgumentParser()
     parser.add_argument("bfcl_dir")
     parser.add_argument("states")
@@ -152,6 +212,7 @@ def main(argv=None):
         entry = {"task_id": task, "decision_key": target, "turn": turn,
                  "y0": label0, "yr": label_r, "full_score": decision["risk_score"],
                  "full_score_offline": offline.score if offline.available else None,
+                 "light_features": light_vector(context).tolist(),
                  "light_score": (light_score(light, light_vector(context))
                                  if light is not None else None),
                  "risk_triggered_online": decision["risk_triggered"],
@@ -179,40 +240,7 @@ def main(argv=None):
                       (abs(row["full_score"] - row["full_score_offline"]) for row in rows
                        if row.get("full_score") is not None
                        and row.get("full_score_offline") is not None), default=None)}}
-    if n:
-        delta = [row["delta"] for row in pool]
-        orders = {"full": [row["full_score"] for row in pool]}
-        if light is not None:
-            orders["light"] = [row["light_score"] for row in pool]
-        curves = {name: (curve(delta, scores) / n).tolist() for name, scores in orders.items()}
-        curves["random_expected"] = [k * sum(delta) / (len(pool) * n) if pool else 0.0
-                                     for k in range(len(pool) + 1)]
-        rng = np.random.default_rng(BOOTSTRAP_SEED)
-        bands = {name: [] for name in (*orders, "random_expected")}
-        for _ in range(BOOTSTRAP):
-            sample = [scored[i] for i in rng.integers(0, n, n)]
-            sub = [row for row in sample if row["extra_generation"]]
-            d = [row["delta"] for row in sub]
-            for name in orders:
-                key = "full_score" if name == "full" else "light_score"
-                bands[name].append(at_grid(curve(d, [row[key] for row in sub]), n))
-            bands["random_expected"].append(at_grid(
-                np.array([k * sum(d) / len(sub) if sub else 0.0 for k in range(len(sub) + 1)]), n))
-        result["curves"] = {"x": [k / n for k in range(len(pool) + 1)], **curves}
-        result["bands"] = {"grid": GRID.tolist(), **{
-            name: {"lo": np.nanpercentile(np.stack(values), 2.5, axis=0).tolist(),
-                   "hi": np.nanpercentile(np.stack(values), 97.5, axis=0).tolist()}
-            for name, values in bands.items()}}
-        result["transitions"] = {
-            scope: {f"{a}->{b}": sum(1 for row in rows_ if (row["y0"], row["yr"]) == (a, b))
-                    for a in (False, True) for b in (False, True)}
-            for scope, rows_ in (("pool", pool), ("all_scored", scored))}
-        risk_labels = [int(not row["y0"]) for row in scored]
-        result["supplement_auroc_ap_on_y0_failure"] = {
-            name: dict(zip(("auroc", "ap"), auc_ap([row[key] for row in scored], risk_labels)))
-            for name, key in (("full", "full_score"), ("light", "light_score")) if name in orders}
-        result["n"], result["pool"] = n, len(pool)
-        result["always_endpoint"] = sum(delta) / n
+    add_curves(result, light is not None)
     write_json(args.out, result)
     print(json.dumps({"coverage": coverage, "n": n, "pool": len(pool)}))
 

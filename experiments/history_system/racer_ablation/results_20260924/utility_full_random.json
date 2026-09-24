@@ -805,6 +805,11 @@
    "extra_generation": false,
    "full_score": 0.4939331028822613,
    "full_score_offline": 0.4939331028822613,
+   "light_features": [
+    0.017026109153854413,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -822,6 +827,11 @@
    "extra_generation": true,
    "full_score": 0.4639379591767602,
    "full_score_offline": 0.4639379591767602,
+   "light_features": [
+    0.010240061391944267,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -839,6 +849,11 @@
    "extra_generation": false,
    "full_score": 0.253142995014578,
    "full_score_offline": 0.253142995014578,
+   "light_features": [
+    0.03167080801158555,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -856,6 +871,11 @@
    "extra_generation": false,
    "full_score": 0.12004773152298068,
    "full_score_offline": 0.12004773152298068,
+   "light_features": [
+    0.01781184299801162,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -873,6 +893,11 @@
    "extra_generation": true,
    "full_score": 0.15335570679969257,
    "full_score_offline": 0.15335570679969257,
+   "light_features": [
+    0.010991544945248032,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -890,6 +915,11 @@
    "extra_generation": false,
    "full_score": 0.2708198412223852,
    "full_score_offline": 0.2708198412223852,
+   "light_features": [
+    0.22048594348222195,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -907,6 +937,11 @@
    "extra_generation": false,
    "full_score": 0.21175595943974085,
    "full_score_offline": 0.21175595943974085,
+   "light_features": [
+    0.046265781966675856,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -923,6 +958,11 @@
    "extra_generation": true,
    "full_score": 0.9592861074055394,
    "full_score_offline": 0.9592861074055394,
+   "light_features": [
+    0.21812443911579502,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -940,6 +980,11 @@
    "extra_generation": false,
    "full_score": 0.1773668217487623,
    "full_score_offline": 0.1773668217487623,
+   "light_features": [
+    0.034391779016871835,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -957,6 +1002,11 @@
    "extra_generation": true,
    "full_score": 0.0429851731894055,
    "full_score_offline": 0.0429851731894055,
+   "light_features": [
+    0.05364513202047598,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -974,6 +1024,11 @@
    "extra_generation": true,
    "full_score": 0.44218820056079083,
    "full_score_offline": 0.44218820056079083,
+   "light_features": [
+    0.14910769435243162,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -991,6 +1046,11 @@
    "extra_generation": true,
    "full_score": 0.9445893444417581,
    "full_score_offline": 0.9445893444417581,
+   "light_features": [
+    0.6614304859047899,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1008,6 +1068,11 @@
    "extra_generation": false,
    "full_score": 0.1477350439883553,
    "full_score_offline": 0.1477350439883553,
+   "light_features": [
+    0.002732869381358114,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1025,6 +1090,11 @@
    "extra_generation": true,
    "full_score": 0.02259857886965888,
    "full_score_offline": 0.02259857886965888,
+   "light_features": [
+    0.2595197754957349,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1042,6 +1112,11 @@
    "extra_generation": false,
    "full_score": 0.2921705594401502,
    "full_score_offline": 0.2921705594401502,
+   "light_features": [
+    0.03916516859874264,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1059,6 +1134,11 @@
    "extra_generation": true,
    "full_score": 0.3438382905692719,
    "full_score_offline": 0.3438382905692719,
+   "light_features": [
+    0.03993046741116172,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1076,6 +1156,11 @@
    "extra_generation": false,
    "full_score": 0.165453992985815,
    "full_score_offline": 0.165453992985815,
+   "light_features": [
+    0.015053936835445883,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1093,6 +1178,11 @@
    "extra_generation": false,
    "full_score": 0.8242774178281824,
    "full_score_offline": 0.8242774178281824,
+   "light_features": [
+    0.3479961267081718,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1110,6 +1200,11 @@
    "extra_generation": false,
    "full_score": 0.26815382656988324,
    "full_score_offline": 0.26815382656988324,
+   "light_features": [
+    0.006490701198510413,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1127,6 +1222,11 @@
    "extra_generation": true,
    "full_score": 0.0664263419902034,
    "full_score_offline": 0.0664263419902034,
+   "light_features": [
+    0.04498276985200533,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1144,6 +1244,11 @@
    "extra_generation": true,
    "full_score": 0.031189346274290465,
    "full_score_offline": 0.031189346274290465,
+   "light_features": [
+    0.05066595751269305,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1161,6 +1266,11 @@
    "extra_generation": true,
    "full_score": 0.2817930146292893,
    "full_score_offline": 0.2817930146292893,
+   "light_features": [
+    0.00019765768505325675,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1178,6 +1288,11 @@
    "extra_generation": true,
    "full_score": 0.3745328836414971,
    "full_score_offline": 0.3745328836414971,
+   "light_features": [
+    0.0007539112941685744,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1195,6 +1310,11 @@
    "extra_generation": false,
    "full_score": 0.16440815378600074,
    "full_score_offline": 0.16440815378600074,
+   "light_features": [
+    0.03742329474343406,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1212,6 +1332,11 @@
    "extra_generation": true,
    "full_score": 0.1046313065285243,
    "full_score_offline": 0.1046313065285243,
+   "light_features": [
+    0.0038622704624316083,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1229,6 +1354,11 @@
    "extra_generation": false,
    "full_score": 0.09365090825394205,
    "full_score_offline": 0.09365090825394205,
+   "light_features": [
+    0.15751161536900773,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1246,6 +1376,11 @@
    "extra_generation": false,
    "full_score": 0.12317800185548096,
    "full_score_offline": 0.12317800185548096,
+   "light_features": [
+    0.011764144490247227,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1263,6 +1398,11 @@
    "extra_generation": true,
    "full_score": 0.22623799996399988,
    "full_score_offline": 0.22623799996399988,
+   "light_features": [
+    0.17283153428964226,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1280,6 +1420,11 @@
    "extra_generation": true,
    "full_score": 0.035268546330543285,
    "full_score_offline": 0.035268546330543285,
+   "light_features": [
+    0.24585939993595834,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1297,6 +1442,11 @@
    "extra_generation": true,
    "full_score": 0.2739368778324775,
    "full_score_offline": 0.2739368778324775,
+   "light_features": [
+    0.1643579464907715,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1314,6 +1464,11 @@
    "extra_generation": true,
    "full_score": 0.022860851649479656,
    "full_score_offline": 0.022860851649479656,
+   "light_features": [
+    0.39588091471099895,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1331,6 +1486,11 @@
    "extra_generation": true,
    "full_score": 0.13602253040988402,
    "full_score_offline": 0.13602253040988402,
+   "light_features": [
+    0.1221753648990007,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1348,6 +1508,11 @@
    "extra_generation": false,
    "full_score": 0.015115015745210975,
    "full_score_offline": 0.015115015745210975,
+   "light_features": [
+    0.43534477681724904,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1365,6 +1530,11 @@
    "extra_generation": false,
    "full_score": 0.023556536355213414,
    "full_score_offline": 0.023556536355213414,
+   "light_features": [
+    0.09695908306632069,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1382,6 +1552,11 @@
    "extra_generation": false,
    "full_score": 0.03962812853091771,
    "full_score_offline": 0.03962812853091771,
+   "light_features": [
+    0.2693119431491991,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1399,6 +1574,11 @@
    "extra_generation": false,
    "full_score": 0.1566709300941481,
    "full_score_offline": 0.1566709300941481,
+   "light_features": [
+    0.010343263335081856,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1416,6 +1596,11 @@
    "extra_generation": true,
    "full_score": 0.29472621413821054,
    "full_score_offline": 0.29472621413821054,
+   "light_features": [
+    0.31968568068017095,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1433,6 +1618,11 @@
    "extra_generation": false,
    "full_score": 0.20438235468548818,
    "full_score_offline": 0.20438235468548818,
+   "light_features": [
+    0.02571299041683055,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1450,6 +1640,11 @@
    "extra_generation": true,
    "full_score": 0.5389861636443023,
    "full_score_offline": 0.5389861636443023,
+   "light_features": [
+    0.26878974951957174,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1467,6 +1662,11 @@
    "extra_generation": true,
    "full_score": 0.07098017891671009,
    "full_score_offline": 0.07098017891671009,
+   "light_features": [
+    0.04029111142492153,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1484,6 +1684,11 @@
    "extra_generation": false,
    "full_score": 0.18702285117552186,
    "full_score_offline": 0.18702285117552186,
+   "light_features": [
+    0.0007081518457567881,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1501,6 +1706,11 @@
    "extra_generation": true,
    "full_score": 0.07903694303729876,
    "full_score_offline": 0.07903694303729876,
+   "light_features": [
+    0.6199863819644503,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1518,6 +1728,11 @@
    "extra_generation": true,
    "full_score": 0.032301379883124835,
    "full_score_offline": 0.032301379883124835,
+   "light_features": [
+    0.34273985766995163,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1535,6 +1750,11 @@
    "extra_generation": true,
    "full_score": 0.11236387073015612,
    "full_score_offline": 0.11236387073015612,
+   "light_features": [
+    0.04465715772819996,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1552,6 +1772,11 @@
    "extra_generation": true,
    "full_score": 0.11645326271025556,
    "full_score_offline": 0.11645326271025556,
+   "light_features": [
+    0.0008901924146517036,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1569,6 +1794,11 @@
    "extra_generation": false,
    "full_score": 0.4722918510863521,
    "full_score_offline": 0.4722918510863521,
+   "light_features": [
+    0.007827873288212056,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1586,6 +1816,11 @@
    "extra_generation": false,
    "full_score": 0.1583950396444891,
    "full_score_offline": 0.1583950396444891,
+   "light_features": [
+    0.002581751363546449,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1603,6 +1838,11 @@
    "extra_generation": false,
    "full_score": 0.5214357452680425,
    "full_score_offline": 0.5214357452680425,
+   "light_features": [
+    0.012421437495380484,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1620,6 +1860,11 @@
    "extra_generation": true,
    "full_score": 0.25659238044547406,
    "full_score_offline": 0.25659238044547406,
+   "light_features": [
+    0.15770151902614415,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1637,6 +1882,11 @@
    "extra_generation": false,
    "full_score": 0.49804201447689056,
    "full_score_offline": 0.49804201447689056,
+   "light_features": [
+    0.003369013196618198,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1654,6 +1904,11 @@
    "extra_generation": false,
    "full_score": 0.6902057246080845,
    "full_score_offline": 0.6902057246080845,
+   "light_features": [
+    0.41591516356546904,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1671,6 +1926,11 @@
    "extra_generation": false,
    "full_score": 0.1663370940732668,
    "full_score_offline": 0.1663370940732668,
+   "light_features": [
+    0.003658043205347021,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1688,6 +1948,11 @@
    "extra_generation": false,
    "full_score": 0.14340849192982189,
    "full_score_offline": 0.14340849192982189,
+   "light_features": [
+    0.0003814127856808606,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1705,6 +1970,11 @@
    "extra_generation": true,
    "full_score": 0.1461886082033722,
    "full_score_offline": 0.1461886082033722,
+   "light_features": [
+    0.2379300690081665,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1722,6 +1992,11 @@
    "extra_generation": true,
    "full_score": 0.2755393016254933,
    "full_score_offline": 0.2755393016254933,
+   "light_features": [
+    0.05782352977397112,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1739,6 +2014,11 @@
    "extra_generation": false,
    "full_score": 0.10676223737960304,
    "full_score_offline": 0.10676223737960304,
+   "light_features": [
+    0.3948167738482071,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1756,6 +2036,11 @@
    "extra_generation": true,
    "full_score": 0.6178570281816571,
    "full_score_offline": 0.6178570281816571,
+   "light_features": [
+    0.5903435313957743,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1773,6 +2058,11 @@
    "extra_generation": false,
    "full_score": 0.16712746173132528,
    "full_score_offline": 0.16712746173132528,
+   "light_features": [
+    0.04046206038787815,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1790,6 +2080,11 @@
    "extra_generation": false,
    "full_score": 0.03466388141939746,
    "full_score_offline": 0.03466388141939746,
+   "light_features": [
+    0.061646076675276794,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1807,6 +2102,11 @@
    "extra_generation": true,
    "full_score": 0.3085877740412188,
    "full_score_offline": 0.3085877740412188,
+   "light_features": [
+    0.0788269458415698,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1824,6 +2124,11 @@
    "extra_generation": false,
    "full_score": 0.117637100741869,
    "full_score_offline": 0.117637100741869,
+   "light_features": [
+    0.014365262728249464,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1841,6 +2146,11 @@
    "extra_generation": false,
    "full_score": 0.8283192654460192,
    "full_score_offline": 0.8283192654460192,
+   "light_features": [
+    0.1862486116430233,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1858,6 +2168,11 @@
    "extra_generation": true,
    "full_score": 0.0032607679195824166,
    "full_score_offline": 0.0032607679195824166,
+   "light_features": [
+    0.2511817405247459,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1875,6 +2190,11 @@
    "extra_generation": true,
    "full_score": 0.1276192576134061,
    "full_score_offline": 0.1276192576134061,
+   "light_features": [
+    8.428331391686382e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1892,6 +2212,11 @@
    "extra_generation": false,
    "full_score": 0.3831874955772708,
    "full_score_offline": 0.3831874955772708,
+   "light_features": [
+    0.26713826190510787,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1909,6 +2234,11 @@
    "extra_generation": false,
    "full_score": 0.1734503776713762,
    "full_score_offline": 0.1734503776713762,
+   "light_features": [
+    0.01087389485827445,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1926,6 +2256,11 @@
    "extra_generation": true,
    "full_score": 0.15227649456035175,
    "full_score_offline": 0.15227649456035175,
+   "light_features": [
+    0.0395329249374015,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1943,6 +2278,11 @@
    "extra_generation": true,
    "full_score": 0.14839495966475266,
    "full_score_offline": 0.14839495966475266,
+   "light_features": [
+    0.001978571103563435,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1960,6 +2300,11 @@
    "extra_generation": false,
    "full_score": 0.2792515756268178,
    "full_score_offline": 0.2792515756268178,
+   "light_features": [
+    0.34811049250576886,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -1977,6 +2322,11 @@
    "extra_generation": true,
    "full_score": 0.1928045432994157,
    "full_score_offline": 0.1928045432994157,
+   "light_features": [
+    0.01328472077026915,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -1994,6 +2344,11 @@
    "extra_generation": true,
    "full_score": 0.08369102454922611,
    "full_score_offline": 0.08369102454922611,
+   "light_features": [
+    0.20368921139010143,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2011,6 +2366,11 @@
    "extra_generation": true,
    "full_score": 0.14709988955210626,
    "full_score_offline": 0.14709988955210626,
+   "light_features": [
+    0.04949518692099192,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2028,6 +2388,11 @@
    "extra_generation": false,
    "full_score": 0.21322354590240283,
    "full_score_offline": 0.21322354590240283,
+   "light_features": [
+    0.023576879627582144,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2045,6 +2410,11 @@
    "extra_generation": true,
    "full_score": 0.17442417941309263,
    "full_score_offline": 0.17442417941309263,
+   "light_features": [
+    0.05652700404032234,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2062,6 +2432,11 @@
    "extra_generation": false,
    "full_score": 0.5225268921458519,
    "full_score_offline": 0.5225268921458519,
+   "light_features": [
+    0.3810828101554433,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2079,6 +2454,11 @@
    "extra_generation": false,
    "full_score": 0.11519127958430012,
    "full_score_offline": 0.11519127958430012,
+   "light_features": [
+    0.0006556428943736611,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2096,6 +2476,11 @@
    "extra_generation": true,
    "full_score": 0.2037763498739111,
    "full_score_offline": 0.2037763498739111,
+   "light_features": [
+    0.3975599313740246,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2113,6 +2498,11 @@
    "extra_generation": true,
    "full_score": 0.5294865166849558,
    "full_score_offline": 0.5294865166849558,
+   "light_features": [
+    0.08379837632447441,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2130,6 +2520,11 @@
    "extra_generation": false,
    "full_score": 0.15403006242557088,
    "full_score_offline": 0.15403006242557088,
+   "light_features": [
+    0.01640286511292722,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2147,6 +2542,11 @@
    "extra_generation": true,
    "full_score": 0.04301168292410819,
    "full_score_offline": 0.04301168292410819,
+   "light_features": [
+    0.3254750911849889,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2164,6 +2564,11 @@
    "extra_generation": false,
    "full_score": 0.15783001051642714,
    "full_score_offline": 0.15783001051642714,
+   "light_features": [
+    0.0040253404877481636,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2181,6 +2586,11 @@
    "extra_generation": true,
    "full_score": 0.1868224310335335,
    "full_score_offline": 0.1868224310335335,
+   "light_features": [
+    0.014970544771170833,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2198,6 +2608,11 @@
    "extra_generation": true,
    "full_score": 0.28809661465859215,
    "full_score_offline": 0.28809661465859215,
+   "light_features": [
+    0.025710174376028638,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2215,6 +2630,11 @@
    "extra_generation": true,
    "full_score": 0.09469608470526641,
    "full_score_offline": 0.09469608470526641,
+   "light_features": [
+    0.28480646586900144,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2232,6 +2652,11 @@
    "extra_generation": true,
    "full_score": 0.19771606606242392,
    "full_score_offline": 0.19771606606242392,
+   "light_features": [
+    0.12290839281887518,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2249,6 +2674,11 @@
    "extra_generation": false,
    "full_score": 0.06042589580585887,
    "full_score_offline": 0.06042589580585887,
+   "light_features": [
+    0.012140700701598001,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2266,6 +2696,11 @@
    "extra_generation": false,
    "full_score": 0.16246120764037048,
    "full_score_offline": 0.16246120764037048,
+   "light_features": [
+    0.04607207192201537,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2283,6 +2718,11 @@
    "extra_generation": false,
    "full_score": 0.1980803621435971,
    "full_score_offline": 0.1980803621435971,
+   "light_features": [
+    0.0014632812020982401,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2300,6 +2740,11 @@
    "extra_generation": true,
    "full_score": 0.14320664522358378,
    "full_score_offline": 0.14320664522358378,
+   "light_features": [
+    0.5691490320596018,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2317,6 +2762,11 @@
    "extra_generation": true,
    "full_score": 0.7678046616730162,
    "full_score_offline": 0.7678046616730162,
+   "light_features": [
+    0.45694247049955483,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2334,6 +2784,11 @@
    "extra_generation": true,
    "full_score": 0.2959924940284394,
    "full_score_offline": 0.2959924940284394,
+   "light_features": [
+    0.0028821813443172767,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2351,6 +2806,11 @@
    "extra_generation": false,
    "full_score": 0.08477668015700938,
    "full_score_offline": 0.08477668015700938,
+   "light_features": [
+    0.36078562002629044,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2368,6 +2828,11 @@
    "extra_generation": true,
    "full_score": 0.40505318489286457,
    "full_score_offline": 0.40505318489286457,
+   "light_features": [
+    0.055015839183037714,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2385,6 +2850,11 @@
    "extra_generation": true,
    "full_score": 0.0823039499364806,
    "full_score_offline": 0.0823039499364806,
+   "light_features": [
+    0.07789922247311312,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2402,6 +2872,11 @@
    "extra_generation": false,
    "full_score": 0.13394064062439504,
    "full_score_offline": 0.13394064062439504,
+   "light_features": [
+    3.971474228118647e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2419,6 +2894,11 @@
    "extra_generation": false,
    "full_score": 0.7186011339220292,
    "full_score_offline": 0.7186011339220292,
+   "light_features": [
+    0.4646062177791914,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2436,6 +2916,11 @@
    "extra_generation": false,
    "full_score": 0.35636101236332257,
    "full_score_offline": 0.35636101236332257,
+   "light_features": [
+    0.5238392817608161,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2453,6 +2938,11 @@
    "extra_generation": false,
    "full_score": 0.18119243114535613,
    "full_score_offline": 0.18119243114535613,
+   "light_features": [
+    0.007811346558973472,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2470,6 +2960,11 @@
    "extra_generation": false,
    "full_score": 0.26528581377874494,
    "full_score_offline": 0.26528581377874494,
+   "light_features": [
+    0.012182334731625227,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2487,6 +2982,11 @@
    "extra_generation": true,
    "full_score": 0.5432079944275986,
    "full_score_offline": 0.5432079944275986,
+   "light_features": [
+    0.517940202233381,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2504,6 +3004,11 @@
    "extra_generation": true,
    "full_score": 0.34229441589827847,
    "full_score_offline": 0.34229441589827847,
+   "light_features": [
+    0.06574966404378658,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2521,6 +3026,11 @@
    "extra_generation": false,
    "full_score": 0.7557192823425742,
    "full_score_offline": 0.7557192823425742,
+   "light_features": [
+    0.12350950647567405,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2538,6 +3048,11 @@
    "extra_generation": true,
    "full_score": 0.36053640180171154,
    "full_score_offline": 0.36053640180171154,
+   "light_features": [
+    0.6421902209986001,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2555,6 +3070,11 @@
    "extra_generation": true,
    "full_score": 0.8743727333183559,
    "full_score_offline": 0.8743727333183559,
+   "light_features": [
+    0.41137267156398505,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2572,6 +3092,11 @@
    "extra_generation": true,
    "full_score": 0.859156190772699,
    "full_score_offline": 0.859156190772699,
+   "light_features": [
+    0.2605269076354007,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2589,6 +3114,11 @@
    "extra_generation": false,
    "full_score": 0.21853519079691158,
    "full_score_offline": 0.21853519079691158,
+   "light_features": [
+    0.003407857686707594,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2606,6 +3136,11 @@
    "extra_generation": true,
    "full_score": 0.5637553898757579,
    "full_score_offline": 0.5637553898757579,
+   "light_features": [
+    0.010598788802403968,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2623,6 +3158,11 @@
    "extra_generation": true,
    "full_score": 0.5260400501008169,
    "full_score_offline": 0.5260400501008169,
+   "light_features": [
+    0.08359047725020423,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2640,6 +3180,11 @@
    "extra_generation": true,
    "full_score": 0.5984106772381994,
    "full_score_offline": 0.5984106772381994,
+   "light_features": [
+    0.5699206830320187,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2657,6 +3202,11 @@
    "extra_generation": false,
    "full_score": 0.34308425498709133,
    "full_score_offline": 0.34308425498709133,
+   "light_features": [
+    0.2002634294622112,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2674,6 +3224,11 @@
    "extra_generation": true,
    "full_score": 0.746546499604196,
    "full_score_offline": 0.746546499604196,
+   "light_features": [
+    0.2275216688231135,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2691,6 +3246,11 @@
    "extra_generation": false,
    "full_score": 0.2168443283673177,
    "full_score_offline": 0.2168443283673177,
+   "light_features": [
+    4.9442728488457985e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2708,6 +3268,11 @@
    "extra_generation": true,
    "full_score": 0.31009344731349914,
    "full_score_offline": 0.31009344731349914,
+   "light_features": [
+    0.027106464768325515,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2725,6 +3290,11 @@
    "extra_generation": true,
    "full_score": 0.3137624929797467,
    "full_score_offline": 0.3137624929797467,
+   "light_features": [
+    0.025110547728438765,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2742,6 +3312,11 @@
    "extra_generation": true,
    "full_score": 0.2505741683375812,
    "full_score_offline": 0.2505741683375812,
+   "light_features": [
+    0.03186917275287498,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2759,6 +3334,11 @@
    "extra_generation": false,
    "full_score": 0.9500728144953502,
    "full_score_offline": 0.9500728144953502,
+   "light_features": [
+    0.5420053919777275,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2776,6 +3356,11 @@
    "extra_generation": true,
    "full_score": 0.6197835924739847,
    "full_score_offline": 0.6197835924739847,
+   "light_features": [
+    0.05926948080333519,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2793,6 +3378,11 @@
    "extra_generation": false,
    "full_score": 0.42314195905540536,
    "full_score_offline": 0.42314195905540536,
+   "light_features": [
+    0.14269653495769674,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2810,6 +3400,11 @@
    "extra_generation": false,
    "full_score": 0.14574221122155512,
    "full_score_offline": 0.14574221122155512,
+   "light_features": [
+    0.08008964852452954,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2827,6 +3422,11 @@
    "extra_generation": true,
    "full_score": 0.627611180312801,
    "full_score_offline": 0.627611180312801,
+   "light_features": [
+    0.08222662049140701,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2844,6 +3444,11 @@
    "extra_generation": true,
    "full_score": 0.49911911631802264,
    "full_score_offline": 0.49911911631802264,
+   "light_features": [
+    0.06841070663172744,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2861,6 +3466,11 @@
    "extra_generation": true,
    "full_score": 0.11838253621278745,
    "full_score_offline": 0.11838253621278745,
+   "light_features": [
+    0.2659477797658981,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2878,6 +3488,11 @@
    "extra_generation": false,
    "full_score": 0.2174248304982076,
    "full_score_offline": 0.2174248304982076,
+   "light_features": [
+    0.005637921250143697,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2895,6 +3510,11 @@
    "extra_generation": true,
    "full_score": 0.40458108822061817,
    "full_score_offline": 0.40458108822061817,
+   "light_features": [
+    0.014107924388107611,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2912,6 +3532,11 @@
    "extra_generation": false,
    "full_score": 0.3418414758599442,
    "full_score_offline": 0.3418414758599442,
+   "light_features": [
+    0.04798874883279799,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2929,6 +3554,11 @@
    "extra_generation": false,
    "full_score": 0.8970199763505986,
    "full_score_offline": 0.8970199763505986,
+   "light_features": [
+    0.12259293456259633,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2946,6 +3576,11 @@
    "extra_generation": false,
    "full_score": 0.30674228937364845,
    "full_score_offline": 0.30674228937364845,
+   "light_features": [
+    0.13093848673964348,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -2963,6 +3598,11 @@
    "extra_generation": true,
    "full_score": 0.5738996907774416,
    "full_score_offline": 0.5738996907774416,
+   "light_features": [
+    0.07021077597299528,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2980,6 +3620,11 @@
    "extra_generation": true,
    "full_score": 0.6375032769493202,
    "full_score_offline": 0.6375032769493202,
+   "light_features": [
+    0.16908821321957282,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -2997,6 +3642,11 @@
    "extra_generation": false,
    "full_score": 0.6016397594415247,
    "full_score_offline": 0.6016397594415247,
+   "light_features": [
+    0.4505173326146582,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3014,6 +3664,11 @@
    "extra_generation": true,
    "full_score": 0.379001609427371,
    "full_score_offline": 0.379001609427371,
+   "light_features": [
+    0.0827468433329482,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3031,6 +3686,11 @@
    "extra_generation": false,
    "full_score": 0.12360657590106197,
    "full_score_offline": 0.12360657590106197,
+   "light_features": [
+    3.1521955635867014e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3048,6 +3708,11 @@
    "extra_generation": false,
    "full_score": 0.15689626671063422,
    "full_score_offline": 0.15689626671063422,
+   "light_features": [
+    7.16668365972358e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3065,6 +3730,11 @@
    "extra_generation": false,
    "full_score": 0.5473364317589372,
    "full_score_offline": 0.5473364317589372,
+   "light_features": [
+    0.17730179691349335,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3082,6 +3752,11 @@
    "extra_generation": true,
    "full_score": 0.591814922126888,
    "full_score_offline": 0.591814922126888,
+   "light_features": [
+    0.2847278323696978,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3099,6 +3774,11 @@
    "extra_generation": false,
    "full_score": 0.22162003911941835,
    "full_score_offline": 0.22162003911941835,
+   "light_features": [
+    0.017378165049982082,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3116,6 +3796,11 @@
    "extra_generation": true,
    "full_score": 0.4822011348722841,
    "full_score_offline": 0.4822011348722841,
+   "light_features": [
+    0.11014362172717204,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3133,6 +3818,11 @@
    "extra_generation": true,
    "full_score": 0.6066842418594717,
    "full_score_offline": 0.6066842418594717,
+   "light_features": [
+    0.1601966003647585,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3150,6 +3840,11 @@
    "extra_generation": false,
    "full_score": 0.051167296788723,
    "full_score_offline": 0.051167296788723,
+   "light_features": [
+    0.4578142814765063,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3167,6 +3862,11 @@
    "extra_generation": true,
    "full_score": 0.2131177920000864,
    "full_score_offline": 0.2131177920000864,
+   "light_features": [
+    0.01764173898889124,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3184,6 +3884,11 @@
    "extra_generation": false,
    "full_score": 0.15085658274698946,
    "full_score_offline": 0.15085658274698946,
+   "light_features": [
+    0.010472642752070832,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3201,6 +3906,11 @@
    "extra_generation": false,
    "full_score": 0.5209406185310643,
    "full_score_offline": 0.5209406185310643,
+   "light_features": [
+    0.03098495591334491,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3218,6 +3928,11 @@
    "extra_generation": false,
    "full_score": 0.3748821788101458,
    "full_score_offline": 0.3748821788101458,
+   "light_features": [
+    0.33475276932979303,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3235,6 +3950,11 @@
    "extra_generation": false,
    "full_score": 0.16981594623704038,
    "full_score_offline": 0.16981594623704038,
+   "light_features": [
+    0.006061157723614159,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3252,6 +3972,11 @@
    "extra_generation": false,
    "full_score": 0.362037700231935,
    "full_score_offline": 0.362037700231935,
+   "light_features": [
+    0.00014211437846662584,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3269,6 +3994,11 @@
    "extra_generation": true,
    "full_score": 0.2780643510581159,
    "full_score_offline": 0.2780643510581159,
+   "light_features": [
+    0.0003700589827876658,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3286,6 +4016,11 @@
    "extra_generation": false,
    "full_score": 0.1577453821742925,
    "full_score_offline": 0.1577453821742925,
+   "light_features": [
+    2.587846971546052e-05,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3303,6 +4038,11 @@
    "extra_generation": true,
    "full_score": 0.5357010050137039,
    "full_score_offline": 0.5357010050137039,
+   "light_features": [
+    0.11384867154519625,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3320,6 +4060,11 @@
    "extra_generation": false,
    "full_score": 0.6690986792003698,
    "full_score_offline": 0.6690986792003698,
+   "light_features": [
+    0.1641379213289298,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3337,6 +4082,11 @@
    "extra_generation": false,
    "full_score": 0.16630388826098402,
    "full_score_offline": 0.16630388826098402,
+   "light_features": [
+    0.02658095598462014,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3354,6 +4104,11 @@
    "extra_generation": false,
    "full_score": 0.8585697733115062,
    "full_score_offline": 0.8585697733115062,
+   "light_features": [
+    0.3101557157019852,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3371,6 +4126,11 @@
    "extra_generation": true,
    "full_score": 0.059527852982786775,
    "full_score_offline": 0.059527852982786775,
+   "light_features": [
+    0.32139926280644965,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3388,6 +4148,11 @@
    "extra_generation": false,
    "full_score": 0.1440334466646566,
    "full_score_offline": 0.1440334466646566,
+   "light_features": [
+    0.019491578054560508,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3405,6 +4170,11 @@
    "extra_generation": false,
    "full_score": 0.48579691637673983,
    "full_score_offline": 0.48579691637673983,
+   "light_features": [
+    0.01834723263627114,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3422,6 +4192,11 @@
    "extra_generation": false,
    "full_score": 0.012775133066853782,
    "full_score_offline": 0.012775133066853782,
+   "light_features": [
+    0.1250962176654282,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3439,6 +4214,11 @@
    "extra_generation": false,
    "full_score": 0.3233256661602304,
    "full_score_offline": 0.3233256661602304,
+   "light_features": [
+    0.005529549872951141,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3456,6 +4236,11 @@
    "extra_generation": false,
    "full_score": 0.1855953943266864,
    "full_score_offline": 0.1855953943266864,
+   "light_features": [
+    0.0005813713670327224,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3473,6 +4258,11 @@
    "extra_generation": false,
    "full_score": 0.1360007296692531,
    "full_score_offline": 0.1360007296692531,
+   "light_features": [
+    0.0009217414088008918,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3490,6 +4280,11 @@
    "extra_generation": false,
    "full_score": 0.09822168344976097,
    "full_score_offline": 0.09822168344976097,
+   "light_features": [
+    0.4110544899008775,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3507,6 +4302,11 @@
    "extra_generation": false,
    "full_score": 0.16165277571482603,
    "full_score_offline": 0.16165277571482603,
+   "light_features": [
+    0.03676609365276441,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3524,6 +4324,11 @@
    "extra_generation": false,
    "full_score": 0.13805194904249035,
    "full_score_offline": 0.13805194904249035,
+   "light_features": [
+    0.0016274327904838514,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3541,6 +4346,11 @@
    "extra_generation": true,
    "full_score": 0.26180918265895675,
    "full_score_offline": 0.26180918265895675,
+   "light_features": [
+    0.004240106977388727,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3558,6 +4368,11 @@
    "extra_generation": true,
    "full_score": 0.4191228158440962,
    "full_score_offline": 0.4191228158440962,
+   "light_features": [
+    0.021311535908372054,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3575,6 +4390,11 @@
    "extra_generation": true,
    "full_score": 0.5488867822034104,
    "full_score_offline": 0.5488867822034104,
+   "light_features": [
+    0.18836207547763792,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3592,6 +4412,11 @@
    "extra_generation": false,
    "full_score": 0.7952907772730128,
    "full_score_offline": 0.7952907772730128,
+   "light_features": [
+    0.27149416784624636,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3609,6 +4434,11 @@
    "extra_generation": false,
    "full_score": 0.9761292705201805,
    "full_score_offline": 0.9761292705201805,
+   "light_features": [
+    0.23923734331564195,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3626,6 +4456,11 @@
    "extra_generation": true,
    "full_score": 0.1961251529840323,
    "full_score_offline": 0.1961251529840323,
+   "light_features": [
+    0.13757263358237107,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": true,
@@ -3643,6 +4478,11 @@
    "extra_generation": false,
    "full_score": 0.21925429895957022,
    "full_score_offline": 0.21925429895957022,
+   "light_features": [
+    0.08183406688197155,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3660,6 +4500,11 @@
    "extra_generation": false,
    "full_score": 0.9474167630775658,
    "full_score_offline": 0.9474167630775658,
+   "light_features": [
+    0.47992812765938475,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3677,6 +4522,11 @@
    "extra_generation": false,
    "full_score": 0.8471984967202084,
    "full_score_offline": 0.8471984967202084,
+   "light_features": [
+    0.21660542154903678,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3694,6 +4544,11 @@
    "extra_generation": false,
    "full_score": 0.9803463842716269,
    "full_score_offline": 0.9803463842716269,
+   "light_features": [
+    0.609465282696944,
+    1.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3711,6 +4566,11 @@
    "extra_generation": false,
    "full_score": 0.14718773251998526,
    "full_score_offline": 0.14718773251998526,
+   "light_features": [
+    0.04415400978988793,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3728,6 +4588,11 @@
    "extra_generation": false,
    "full_score": 0.18466029849055388,
    "full_score_offline": 0.18466029849055388,
+   "light_features": [
+    0.08812987298364654,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
@@ -3745,6 +4610,11 @@
    "extra_generation": false,
    "full_score": 0.29122550476313014,
    "full_score_offline": 0.29122550476313014,
+   "light_features": [
+    0.002579362468458343,
+    0.0,
+    1.0
+   ],
    "light_score": null,
    "parse_fallback": false,
    "regenerated_action_committed": false,
