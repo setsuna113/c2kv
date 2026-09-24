@@ -83,9 +83,15 @@ class EventNativeRecoveryController:
             return cached
         messages = payload.get("messages")
         tools = payload.get("tools") or []
-        store = EventStore.from_messages(
-            session_id, messages, benchmark=self.benchmark
-        )
+        if self.benchmark == "acebench":
+            from ..acebench_source import build_ace_event_store
+
+            store = build_ace_event_store(
+                session_id, messages, payload.get("c2kv_ace_source"))
+        else:
+            store = EventStore.from_messages(
+                session_id, messages, benchmark=self.benchmark
+            )
         prepared = PreparedEventNativeRecovery(
             memory=base_prepared.memory,
             metadata=copy.deepcopy(base_prepared.metadata),

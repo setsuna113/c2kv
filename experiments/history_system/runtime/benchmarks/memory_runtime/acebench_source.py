@@ -64,6 +64,18 @@ def _decode_value(node: ast.AST) -> Any:
         raise _unsupported("constant_value")
     if isinstance(node, ast.List):
         return [_decode_value(item) for item in node.elts]
+    if isinstance(node, ast.Dict):
+        result: dict[str, Any] = {}
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                raise _unsupported("dict_unpack")
+            if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+                raise _unsupported("dict_key")
+            key = key_node.value
+            if key in result:
+                raise _unsupported("duplicate_dict_key")
+            result[key] = _decode_value(value_node)
+        return result
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.USub):
             raise _unsupported("unary_operator")
@@ -78,8 +90,6 @@ def _decode_value(node: ast.AST) -> Any:
         if isinstance(value, float) and not math.isfinite(value):
             raise _unsupported("non_finite_number")
         return value
-    if isinstance(node, ast.Dict):
-        raise _unsupported("dict_value")
     if isinstance(node, ast.Tuple):
         raise _unsupported("tuple_value")
     if isinstance(node, ast.Name):
@@ -139,7 +149,7 @@ def parse_acebench_draft(text: str, *, call_id_prefix: str) -> NativeDraft:
     """Parse one complete ACEBench action list without evaluating Python.
 
     Only ``[Name(keyword=value), ...]`` is admitted.  Values are recursively
-    limited to JSON-compatible primitive/list literals.  Any unsupported AST
+    limited to JSON-compatible primitive/list/dict literals.  Any unsupported AST
     form fails the entire draft, so no partial executable-looking calls escape.
     """
 

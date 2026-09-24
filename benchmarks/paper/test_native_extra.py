@@ -78,6 +78,27 @@ def test_toolsandbox_uses_official_resolver_and_checks_configured_subset(tmp_pat
         native_extra.selected_tasks(config, "toolsandbox", ["missing"])
 
 
+@pytest.mark.parametrize("normal_termination", [True, False, None])
+def test_toolsandbox_native_receipt_uses_official_conversation_state(
+        tmp_path, monkeypatch, normal_termination):
+    from benchmarks.adapters import toolsandbox_adapter as ts
+
+    config = _config(tmp_path)
+    task = "scenario_one"
+    task_out = tmp_path / "task"
+    (task_out / "toolsandbox").mkdir(parents=True)
+    monkeypatch.setattr(ts, "run_ts", lambda *args, **kwargs: {
+        "n": 1, "scenario_ids": [task], "semantic_score": 0.75,
+        "normal_termination_by_scenario": {task: normal_termination},
+    })
+    official = native_extra._run_official(
+        config, "toolsandbox", task, task_out, "http://agent/v1", "racer-arm")
+    assert official["task_rows"] == [{
+        "task_id": task, "semantic_score": 0.75,
+        "normal_termination": normal_termination, "protocol_legal": None,
+    }]
+
+
 def test_toolsandbox_named_suite_is_validated_against_official_resolver(tmp_path, monkeypatch):
     config = _config(tmp_path)
     config["toolsandbox_suite"] = THREE_DISTRACTION_TOOLS_129

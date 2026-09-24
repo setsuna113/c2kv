@@ -399,6 +399,21 @@ def score_cli_run(out_dir: Path, *, scenarios: "list[str] | None", expected: int
     return summary
 
 
+def official_normal_termination(summary_path: Path, scenario_id: str) -> "bool | None":
+    """Read the final conversation state saved by the official scenario runner."""
+    path = summary_path.parent / "trajectories" / scenario_id / "execution_context.json"
+    if not path.is_file():
+        return None
+    context = json.loads(path.read_text(encoding="utf-8"))
+    rows = context.get("_dbs", {}).get("SANDBOX")
+    if not isinstance(rows, list) or not rows or not isinstance(rows[-1], dict):
+        raise SystemExit(f"FATAL: ToolSandbox final sandbox state is invalid: {scenario_id}")
+    active = rows[-1].get("conversation_active")
+    if type(active) is not bool:
+        raise SystemExit(f"FATAL: ToolSandbox final conversation_active is invalid: {scenario_id}")
+    return not active
+
+
 def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str, Any]:
     reject_rapidapi_http_failures(out_dir)
     summaries = sorted(out_dir.glob("agent_*/result_summary.json"))
@@ -414,6 +429,7 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
     proxy_failures = _invalid_retrieval_scenarios(out_dir)
     proxy_budget_failures = _declared_budget_failure_scenarios(out_dir)
     budget_failures: Dict[str, List[str]] = defaultdict(list)
+    normal_termination_by_scenario: Dict[str, bool | None] = {}
     seen_ids: set[str] = set()
     for path in summaries:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -426,6 +442,7 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
             if scenario_id in seen_ids:
                 raise SystemExit(f"FATAL: duplicate ToolSandbox official scenario: {scenario_id}")
             seen_ids.add(scenario_id)
+            normal_termination_by_scenario[scenario_id] = official_normal_termination(path, scenario_id)
             traceback = scenario.get("traceback")
             if traceback:
                 # A request for nonexistent completed history is an actor
@@ -487,6 +504,7 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
             f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
     summary = aggregate(rows, cluster_key="task_id")
     summary["scenario_ids"] = sorted(str(row["task_id"]) for row in rows)
+    summary["normal_termination_by_scenario"] = normal_termination_by_scenario
     summary["task_failures"] = {
         "hiagent_invalid_retrieval": sorted(invalid_retrieval_failures)}
     if capacity_failures:

@@ -15,6 +15,33 @@ def _result(path, scenarios):
         json.dumps({"per_scenario_results": scenarios}), encoding="utf-8")
 
 
+def _official_context(path, scenario, *, active):
+    folder = path / "agent_run" / "trajectories" / scenario
+    folder.mkdir(parents=True)
+    (folder / "execution_context.json").write_text(json.dumps({
+        "_dbs": {"SANDBOX": [
+            {"sandbox_message_index": 0, "conversation_active": True},
+            {"sandbox_message_index": 5, "conversation_active": active,
+             "content": "Ended conversation."},
+        ]},
+    }), encoding="utf-8")
+
+
+def test_official_conversation_state_distinguishes_user_stop_from_message_limit(tmp_path):
+    _result(tmp_path, [
+        {"name": "user_stopped", "similarity": 1.0},
+        {"name": "limit_reached", "similarity": 1.0},
+        {"name": "older_archive", "similarity": 1.0},
+    ])
+    _official_context(tmp_path, "user_stopped", active=False)
+    _official_context(tmp_path, "limit_reached", active=True)
+    result = ts.collect(tmp_path)
+    assert result["semantic_score"] == 1.0
+    assert result["normal_termination_by_scenario"] == {
+        "user_stopped": True, "limit_reached": False, "older_archive": None,
+    }
+
+
 def test_invalid_hiagent_retrieval_is_task_local_and_preserves_other_scores(tmp_path):
     _result(tmp_path, [
         {"name": "complete", "similarity": 1.0, "traceback": None},

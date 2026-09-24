@@ -498,9 +498,15 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
     score = summary.get("semantic_score")
     if type(score) not in (int, float):
         raise RuntimeError("Official harness did not return one numeric semantic score")
-    normal_termination = True
+    normal_termination = None
     if benchmark == "tau2":
         normal_termination = summary["task_rows"][0]["termination"] in {"agent_stop", "user_stop"}
+    elif benchmark == "toolsandbox":
+        normal_termination = (summary.get("normal_termination_by_scenario") or {}).get(task)
+        if normal_termination is not None and type(normal_termination) is not bool:
+            raise RuntimeError("ToolSandbox official termination state is invalid")
+    else:
+        normal_termination = True
     official = {
         "schema": "paper-native-extra-official-task-v1",
         "benchmark": namespace, "task_id": task, "official_scorer": scorer,

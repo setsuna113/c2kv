@@ -32,7 +32,10 @@ from benchmarks.memory_runtime.acebench_controls import (
     _validate_ace_request,
     build_acebench_controller,
 )
-from benchmarks.memory_runtime.acebench_source import parse_acebench_draft
+from benchmarks.memory_runtime.acebench_source import (
+    build_ace_event_store,
+    parse_acebench_draft,
+)
 from benchmarks.memory_runtime.always_compress import (
     ALWAYS_COMPRESSION_POLICY,
     CapacityInfeasible,
@@ -134,19 +137,26 @@ RESCUED_DECISION = {
 BACKENDS = (None, "c2kv", "pyramidkv", "h2o")
 
 
-def _racer_backend(name, budget):
+def _racer_backend(name, budget, *, schema="v2"):
     config = {
-        "schema": "racer-backend-v2", "backend": name, "policy": "c1_v2_verified",
-        "history_budget_tokens": budget, "allocation": "racer_s0", "mode": "on",
+        "schema": f"racer-backend-{schema}", "backend": name,
+        "policy": "c1_v2_verified", "history_budget_tokens": budget,
+        "allocation": "racer_s0" if schema == "v2" else "backend_native_persistent",
         "detector_calibration": (
             "reference" if name == "c2kv" else "frozen_c2kv_unvalidated_transfer"),
     }
+    if schema == "v2":
+        config["mode"] = "on"
+    elif schema == "v4":
+        config["extra_protection"] = "on"
+    else:
+        raise ValueError("unsupported test RACER schema")
     if name == "c2kv":
         config["backend_config"] = {"method": "c2kv"}
     return config
 
 
-def _controller(monkeypatch, backend, budget, *, score=0.2):
+def _controller(monkeypatch, backend, budget, *, score=0.2, schema="v2"):
     monkeypatch.setattr(
         "benchmarks.memory_runtime.candidate_algorithms.controller.C1RiskArtifact",
         lambda artifact: Risk(score))
@@ -155,7 +165,7 @@ def _controller(monkeypatch, backend, budget, *, score=0.2):
                  "risk_threshold": 0.5, **c1_v2_fields("c1_v2_verified")}
     s0_config = {**S0_CONFIG_DEFAULTS, "candidate_algorithm": candidate}
     if backend is not None:
-        s0_config["racer_backend"] = _racer_backend(backend, budget)
+        s0_config["racer_backend"] = _racer_backend(backend, budget, schema=schema)
     return build_acebench_controller(
         Tokenizer(), packing={**packing(), "ratios": [8], "max_target_tokens": 64},
         policy=policy(budget), view_mode=NATIVE_S0_MODE,
@@ -178,6 +188,78 @@ def _incumbent_s0(gate):
     return node
 
 
+def test_archived_food_order_dict_literal_is_a_complete_ace_event():
+    draft = parse_acebench_draft(_ACTION_0, call_id_prefix="held")
+    assert draft.status == "tool_calls"
+    assert len(draft.tool_calls) == 3
+    assert json.loads(draft.tool_calls[1]["function"]["arguments"])["items"] == [
+        {"product": "Super Supreme Pizza", "quantity": 1}]
+    payload = FAILED_DECISION
+    store = build_ace_event_store(
+        payload["session_id"], payload["messages"][:4],
+        {"version": "acebench-text-actions-v1",
+         "receipts": payload["c2kv_ace_source"]["receipts"][:1]})
+    event = store.events[2]
+    assert event.kind == "tool_event"
+    assert event.complete is True
+    assert event.source_indices == (2, 3)
+    assert len(event.tool_call_ids) == 3
+    assert [message.to_dict() for message in store.messages] == payload["messages"][:4]
+
+
+def test_ace_dict_literal_recurses_through_lists_and_dicts():
+    draft = parse_acebench_draft(
+        "[send(payload={'outer': [{'inner': {'count': -1, 'ok': None}}]})]",
+        call_id_prefix="held")
+    assert draft.status == "tool_calls"
+    assert json.loads(draft.tool_calls[0]["function"]["arguments"]) == {
+        "payload": {"outer": [{"inner": {"count": -1, "ok": None}}]}}
+
+
+@pytest.mark.parametrize(("action", "reason"), [
+    ("[send(payload={1: 'x'})]", "dict_key"),
+    ("[send(payload={'a': 1, 'a': 2})]", "duplicate_dict_key"),
+    ("[send(payload={**{'a': 1}})]", "dict_unpack"),
+    ("[send(payload={'a': helper()})]", "nested_call"),
+    ("[send(payload={'a': 1e309})]", "non_finite_number"),
+])
+def test_ace_dict_literal_rejects_unsafe_values(action, reason):
+    draft = parse_acebench_draft(action, call_id_prefix="held")
+    assert draft.status == "malformed"
+    assert draft.reason == f"unsupported_ace_grammar:{reason}"
+
+
+def test_v4_ace_s0_gate_uses_the_same_dict_literal_receipt_parser(monkeypatch):
+    controller = _controller(monkeypatch, "h2o", 4096, schema="v4")
+    leaf = _find(controller, EventNativeS0Controller)
+    assert leaf._validate_request.__func__ is _validate_ace_request
+    _, _, ace_store, _, _, _ = leaf._validate_request(FAILED_DECISION, 8, 8)
+    assert [(event.kind, event.complete) for event in ace_store.events[2:4]] == [
+        ("tool_event", True), ("tool_event", True)]
+    prepared = controller.prepare(copy.deepcopy(FAILED_DECISION), ratio=8, max_new_tokens=8)
+    assert prepared.metadata["racer_backend"]["schema"] == "racer-backend-v4"
+    assert prepared.metadata["native_protection_request"]["input_rewritten"] is False
+    assert prepared.memory.recovery_messages == ()
+    assert [(event.kind, event.complete) for event in prepared._store.events[2:4]] == [
+        ("tool_event", True), ("tool_event", True)]
+
+
+@pytest.mark.parametrize("receipt_change", [
+    {"decode_status": "error"},
+    {"decoded_calls": ["login_food_platform(username='Mallory')", *_DECODED_0[1:]]},
+])
+def test_v4_ace_recovery_store_keeps_unverified_execution_opaque(
+        monkeypatch, receipt_change):
+    payload = copy.deepcopy(FAILED_DECISION)
+    payload["c2kv_ace_source"]["receipts"][0].update(receipt_change)
+    controller = _controller(monkeypatch, "h2o", 4096, schema="v4")
+    prepared = controller.prepare(payload, ratio=8, max_new_tokens=8)
+    event = prepared._store.events[2]
+    assert event.kind == "acebench_execution_opaque"
+    assert event.complete is False
+    assert event.source_indices == (2, 3)
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_ace_source_contract_is_bound_on_both_gate_branches(monkeypatch, backend):
     gate = _find(_controller(monkeypatch, backend, 256), CapacityGatedSourceAllocator)
@@ -194,6 +276,11 @@ def test_ace_source_contract_is_bound_on_both_gate_branches(monkeypatch, backend
 def test_failed_ace_decision_is_a_capacity_outcome_not_a_privileged_field(
         monkeypatch, backend):
     controller = _controller(monkeypatch, backend, 24)
+    payload = copy.deepcopy(FAILED_DECISION)
+    # A receipt that cannot verify the historical execution remains opaque.
+    # The archived dict action is now parseable, so it no longer supplies this
+    # capacity-failure fixture on every backend by itself.
+    payload["c2kv_ace_source"]["receipts"][0]["decode_status"] = "error"
     gate = _find(controller, CapacityGatedSourceAllocator)
     seen = []
     original = gate.source_allocator.prepare
@@ -206,8 +293,8 @@ def test_failed_ace_decision_is_a_capacity_outcome_not_a_privileged_field(
     # CapacityInfeasible is the per-task method outcome the API records as
     # c2kv_capacity_infeasible; PolicyInputError stopped the whole server.
     with pytest.raises(CapacityInfeasible):
-        controller.prepare(copy.deepcopy(FAILED_DECISION), ratio=8, max_new_tokens=8)
-    assert seen == [sorted(FAILED_DECISION)]
+        controller.prepare(payload, ratio=8, max_new_tokens=8)
+    assert seen == [sorted(payload)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
