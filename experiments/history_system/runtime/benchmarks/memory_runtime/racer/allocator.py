@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from history_memory.packing import PackedMemory, native_ids, visible_message
 from ..adapter import raw_source_cutoff
 from ..always_compress import CapacityInfeasible
+from ..event_native_policy import _json_snapshot
 from ..event_native_raw import RuntimeMemoryView
 from ..event_native_s0_policy import EventNativeS0Controller, PreparedEventNativeS0, _Measurement
 
@@ -123,6 +124,10 @@ class PersistentHistoryAllocator(EventNativeS0Controller):
                      common_tokens, max_new_tokens, *, derived_messages=()):
         mandatory, raw = set(mandatory_ids), set(raw_ids)
         eligible = set(eligible_event_ids)
+        # Render the catalog exactly as the draft's request validation did.
+        # Recovery wrappers keep the client's key order, so a repack would
+        # otherwise change the common tool prologue and its accounting.
+        tools = tuple(_json_snapshot(tool) for tool in tools)
         restored = tuple(event.event_id for event in store.events
                          if event.event_id in raw - mandatory)
         if any(event_id not in eligible or not store.event(event_id).complete for event_id in restored):
