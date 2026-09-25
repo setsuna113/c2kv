@@ -187,6 +187,27 @@ def test_start_proxy_rejects_its_own_exited_child(monkeypatch, tmp_path):
         run.start_proxy("http://up", "full", 34100, tmp_path)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux TCP TIME_WAIT reuse")
+def test_proxy_port_probe_allows_previous_cells_time_wait():
+    import socket
+
+    with socket.socket() as listener, socket.socket() as client:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        listener.listen()
+        client.settimeout(2)
+        client.connect(("127.0.0.1", port))
+        with listener.accept()[0] as accepted:
+            accepted.shutdown(socket.SHUT_WR)
+            assert client.recv(1) == b""
+            client.close()
+    with socket.socket() as old_probe:
+        with pytest.raises(OSError):
+            old_probe.bind(("127.0.0.1", port))
+    run._assert_proxy_port_available(port)
+
+
 def test_stop_process_kills_child_that_ignores_terminate():
     class Stuck:
         def __init__(self):

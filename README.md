@@ -13,6 +13,7 @@ and the modular benchmark system. Serving lives in the separate
 | D repair experiments | `agent/d_contract_driver.py`, `agent/d_ksweep_driver.py`, `agent/eval_agent_history_c2kv.py` |
 | G training and evaluation | `agent/train_joint_next_action_c2kv.py`, `start_h200.sh`, `agent/eval_history_dev_c2kv_h200.sh` |
 | Shared end-to-end evaluation | [`benchmarks/run.py`](benchmarks/run.py), [`benchmarks/README.md`](benchmarks/README.md) |
+| Experiment 2 CUDA handoff | [`benchmarks/paper/EXPERIMENT2_CUDA.md`](benchmarks/paper/EXPERIMENT2_CUDA.md), [`experiment2_cuda.json`](benchmarks/paper/experiment2_cuda.json) |
 | Server validation | [`benchmarks/ops/README.md`](benchmarks/ops/README.md) |
 
 Read [`docs/c2kv_semantics.md`](docs/c2kv_semantics.md) before choosing a
