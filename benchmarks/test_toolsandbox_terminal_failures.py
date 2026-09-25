@@ -181,3 +181,45 @@ def test_budget_text_without_matching_proxy_declaration_remains_crash(tmp_path, 
         _proxy_budget_evidence(tmp_path, "capped", "hiagent_history_budget_exceeded")
     with pytest.raises(SystemExit, match="scenario\\(s\\) crashed"):
         ts.collect(tmp_path)
+
+
+# box9 racer_v4 SnapKV ToolSandbox window 0: the model called a tool the
+# scenario does not offer; the official agent wrapper raised this KeyError.
+UNKNOWN_TOOL_TRACEBACK = """Traceback (most recent call last):
+  File "ToolSandbox/tool_sandbox/roles/openai_api_agent.py", line 120, in respond
+    content=openai_tool_call_to_python_code(
+  File "ToolSandbox/tool_sandbox/common/message_conversion.py", line 79, in openai_tool_call_to_python_code
+    raise KeyError(
+KeyError: "Agent tool call agent_facing_tool_name='set_location_service_status' is not a known allowed tool. Options are available_tool_names={'get_location_service_status', 'add_reminder'}"
+"""
+
+
+def test_unknown_tool_call_is_a_task_local_actor_failure(tmp_path):
+    _result(tmp_path, [
+        {"name": "complete", "similarity": 1.0, "traceback": None},
+        {"name": "unknown_tool", "similarity": 0, "exception_type": "KeyError",
+         "traceback": UNKNOWN_TOOL_TRACEBACK},
+    ])
+    result = ts.collect(tmp_path)
+    assert result["n"] == 2
+    assert result["semantic_score"] == 0.5
+    assert result["task_failures"] == {"hiagent_invalid_retrieval": [],
+                                       "agent_unknown_tool_call": ["unknown_tool"]}
+
+
+@pytest.mark.parametrize("exception_type,traceback", [
+    ("KeyError", "KeyError: 'messages'"),
+    ("RuntimeError", UNKNOWN_TOOL_TRACEBACK),
+])
+def test_other_key_errors_and_runner_failures_still_stop_the_job(tmp_path, exception_type, traceback):
+    _result(tmp_path, [
+        {"name": "complete", "similarity": 1.0},
+        {"name": "crashed", "similarity": 0, "exception_type": exception_type, "traceback": traceback},
+    ])
+    with pytest.raises(SystemExit, match="1 scenario\(s\) crashed"):
+        ts.collect(tmp_path)
+
+
+def test_summaries_without_unknown_tools_keep_their_task_failure_keys(tmp_path):
+    _result(tmp_path, [{"name": "complete", "similarity": 1.0}])
+    assert ts.collect(tmp_path)["task_failures"] == {"hiagent_invalid_retrieval": []}

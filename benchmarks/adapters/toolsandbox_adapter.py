@@ -265,6 +265,22 @@ def _invalid_retrieval_scenarios(out_dir: Path) -> set[str]:
             ))}
 
 
+UNKNOWN_TOOL_CALL = "agent_unknown_tool_call"
+
+
+def _unknown_tool_call(scenario: Dict[str, Any], traceback: Any) -> bool:
+    """The official agent wrapper rejected a tool name the scenario does not offer.
+
+    ToolSandbox raises this KeyError while converting the model's own tool call
+    (common.message_conversion.openai_tool_call_to_python_code); the official
+    CLI scores the scenario 0. Any other KeyError is not matched.
+    """
+    text = str(traceback)
+    return (scenario.get("exception_type") == "KeyError"
+            and "openai_tool_call_to_python_code" in text
+            and "is not a known allowed tool" in text)
+
+
 def _declared_budget_failure_scenarios(out_dir: Path) -> Dict[str, str]:
     """Return scenario-bound ACON/HiAgent budget declarations from proxy logs."""
     declared = {}
@@ -426,6 +442,7 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
     crashed: List[str] = []
     invalid_retrieval_failures: List[str] = []
     capacity_failures: List[str] = []
+    unknown_tool_failures: List[str] = []
     proxy_failures = _invalid_retrieval_scenarios(out_dir)
     proxy_budget_failures = _declared_budget_failure_scenarios(out_dir)
     budget_failures: Dict[str, List[str]] = defaultdict(list)
@@ -481,6 +498,13 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
                                  "official_similarity": None,
                                  "task_failure_kind": "hiagent_invalid_retrieval",
                                  "protocol_legal": None})
+                elif _unknown_tool_call(scenario, traceback):
+                    # Like an invalid retrieval, this is the actor's own action.
+                    unknown_tool_failures.append(scenario_id)
+                    rows.append({"task_id": scenario_id, "semantic_score": 0.0,
+                                 "official_similarity": None,
+                                 "task_failure_kind": UNKNOWN_TOOL_CALL,
+                                 "protocol_legal": None})
                 else:
                     crashed.append(scenario_id)
                 continue
@@ -509,6 +533,8 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
         "hiagent_invalid_retrieval": sorted(invalid_retrieval_failures)}
     if capacity_failures:
         summary["task_failures"]["c2kv_capacity_infeasible"] = sorted(capacity_failures)
+    if unknown_tool_failures:
+        summary["task_failures"][UNKNOWN_TOOL_CALL] = sorted(unknown_tool_failures)
     for code, scenario_ids in sorted(budget_failures.items()):
         summary["task_failures"][code] = sorted(scenario_ids)
     return summary
