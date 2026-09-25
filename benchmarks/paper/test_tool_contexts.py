@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from benchmarks.paper import runner
+from benchmarks.toolmemory import parse_tool_memory_spec, validate_ready_tool_contract
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT.parent / "sglang-paper"
@@ -158,6 +159,65 @@ def test_tool_budget_reaches_native_and_proxy_commands():
             continue
         command = runner.run_command(config, cell, Path("/out/cell"), Path("/out/profile.json"))
         assert command[command.index("--tool-budget-tokens") + 1] == "128"
+
+
+@pytest.mark.parametrize("recovery", ["draft-full-raw", "always-full-raw"])
+def test_tool_recovery_context_reaches_native_command_and_matrix(tmp_path, recovery):
+    config = _with_tool_context(
+        _config(), arms=("c2kv_c1_t02_r8",), name="t0_recovery",
+        spec="t0:r8:uniform:schema")
+    config["tool_contexts"][0]["tool_recovery"] = recovery
+    cell = next(row for row in runner.cells(config)
+                if row["cell_id"] == "bfcl_base__c2kv_c1_t02_r8__tools-t0_recovery")
+    assert cell["tool_recovery"] == recovery
+    assert "tool_budget_tokens" not in cell
+    command = runner.run_command(config, cell, tmp_path, tmp_path / "profile.json")
+    assert command[command.index("--tool-recovery") + 1] == recovery
+    plan, _ = runner.prepare(config, tmp_path / "out", SOURCE)
+    prepared = next(row for row in plan if row["cell_id"] == cell["cell_id"])
+    assert prepared["tool_recovery"] == recovery
+    with (tmp_path / "out" / "matrix.csv").open(encoding="utf-8", newline="") as handle:
+        row = next(row for row in csv.DictReader(handle) if row["cell_id"] == cell["cell_id"])
+    assert row["tool_recovery"] == recovery
+
+
+def test_tool_recovery_context_is_native_only():
+    config = _with_tool_context(_config(), arms=("full",), name="t0_recovery",
+                                spec="t0:r8:uniform:schema")
+    config["tool_contexts"][0]["tool_recovery"] = "draft-full-raw"
+    with pytest.raises(ValueError, match="event-native arm"):
+        runner.cells(config)
+    config = _with_tool_context(_config(), arms=(), name="t0_recovery",
+                                spec="t0:r8:uniform:schema")
+    config["tool_contexts"][0]["tool_recovery"] = "draft-full-raw"
+    extended = runner.with_tool_contexts(config, ["t0_recovery"])
+    assert not any("t0_recovery" in method.get("tool_contexts", [])
+                   for method in extended["methods"] if method["arm"] == "full")
+    assert any("t0_recovery" in method.get("tool_contexts", [])
+               for method in extended["methods"] if method["arm"] == "c2kv_c1_t02_r8")
+    misplaced = _config(tool_recovery="draft-full-raw")
+    with pytest.raises(ValueError, match="named tool_context"):
+        runner.tool_contexts(misplaced)
+    misplaced = _config()
+    misplaced["methods"][0]["tool_recovery"] = "draft-full-raw"
+    with pytest.raises(ValueError, match="named tool_context"):
+        runner.cells(misplaced)
+
+
+def test_ready_contract_requires_requested_tool_recovery(tmp_path):
+    spec = "t0:r8:uniform:schema"
+    manifest = {"tool_memory_contract": {
+        "spec": parse_tool_memory_spec(spec).as_dict(),
+        "tool_budget_tokens": None,
+        "checkpoint": {"checkpoint": str(tmp_path)},
+    }}
+    validate_ready_tool_contract(manifest, spec, tmp_path)
+    with pytest.raises(RuntimeError, match="tool memory contract"):
+        validate_ready_tool_contract(manifest, spec, tmp_path, tool_recovery="draft-full-raw")
+    manifest["tool_memory_contract"]["tool_recovery"] = "draft-full-raw"
+    validate_ready_tool_contract(manifest, spec, tmp_path, tool_recovery="draft-full-raw")
+    with pytest.raises(RuntimeError, match="tool memory contract"):
+        validate_ready_tool_contract(manifest, spec, tmp_path)
 
 
 def test_prepare_writes_tool_context_column_and_commands(tmp_path):

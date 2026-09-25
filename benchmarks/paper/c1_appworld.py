@@ -332,6 +332,8 @@ def server_command(
             command.extend(["--tool-checkpoint", str(Path(config["tool_checkpoint"]).resolve())])
         if config.get("tool_budget_tokens") is not None:
             command.extend(["--tool-budget-tokens", str(config["tool_budget_tokens"])])
+        if config.get("tool_recovery", "none") != "none":
+            command.extend(["--tool-recovery", config["tool_recovery"]])
     return command
 
 

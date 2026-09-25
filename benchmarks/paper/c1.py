@@ -148,6 +148,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
             command += ["--tool-checkpoint", config["tool_checkpoint"]]
         if config.get("tool_budget_tokens") is not None:
             command += ["--tool-budget-tokens", str(config["tool_budget_tokens"])]
+        if config.get("tool_recovery", "none") != "none":
+            command += ["--tool-recovery", config["tool_recovery"]]
     if config.get("tool_schema"):
         command += NativeToolSchema(config["tool_schema"]).cli_args()
     args = delivery.build_parser().parse_args(command)
@@ -699,21 +701,38 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     return native
 
 
-def apply_tool_cli(config, tool_memory, tool_checkpoint, tool_budget_tokens):
+def apply_tool_cli(config, tool_memory, tool_checkpoint, tool_budget_tokens,
+                   tool_recovery=None):
     from benchmarks.toolmemory import parse_tool_memory_spec
 
+    if tool_recovery not in (None, "none", "draft-full-raw", "always-full-raw"):
+        raise ValueError(f"Unknown tool recovery mode: {tool_recovery!r}")
     spec = parse_tool_memory_spec(tool_memory)
     if spec is None:
         if tool_checkpoint or tool_budget_tokens is not None:
             raise ValueError("Tool options require active --tool-memory")
         if tool_memory:
-            for key in ("tool_memory", "tool_checkpoint", "tool_budget_tokens"):
+            if tool_recovery not in (None, "none"):
+                raise ValueError("Tool recovery requires active --tool-memory")
+            for key in ("tool_memory", "tool_checkpoint", "tool_budget_tokens", "tool_recovery"):
                 config.pop(key, None)
+        elif tool_recovery is not None:
+            if parse_tool_memory_spec(config.get("tool_memory")) is None:
+                if tool_recovery != "none":
+                    raise ValueError("Tool recovery requires active --tool-memory")
+                config.pop("tool_recovery", None)
+            else:
+                config["tool_recovery"] = tool_recovery
+        elif (config.get("tool_recovery", "none") != "none"
+              and parse_tool_memory_spec(config.get("tool_memory")) is None):
+            raise ValueError("Tool recovery requires active --tool-memory")
         return
     config["tool_memory"] = tool_memory
     config["tool_checkpoint"] = tool_checkpoint
     if tool_budget_tokens is not None:
         config["tool_budget_tokens"] = tool_budget_tokens
+    if tool_recovery is not None:
+        config["tool_recovery"] = tool_recovery
 
 
 @unwind_on_termination
@@ -732,6 +751,7 @@ def main(argv=None):
     parser.add_argument("--tool-memory", default="")
     parser.add_argument("--tool-checkpoint", default="")
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--tool-recovery", choices=("none", "draft-full-raw", "always-full-raw"))
     parser.add_argument("--tool-schema", default="",
                         help="explicit native tool prologue schema (sglang-full or raw); empty keeps the release default")
     parser.add_argument("--history-budget-tokens", type=int)
@@ -745,7 +765,8 @@ def main(argv=None):
         if ARM not in NATIVE_RATIOS and args.benchmark not in native_budget_benchmarks(ARM):
             parser.error("Native history budget sweep currently supports BFCL only")
         config["native_history_budget_tokens"] = budget.target_tokens
-    apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)
+    apply_tool_cli(config, args.tool_memory, args.tool_checkpoint,
+                   args.tool_budget_tokens, args.tool_recovery)
     if args.tool_schema:
         config["tool_schema"] = NativeToolSchema(args.tool_schema).schema
     if args.upstream:

@@ -29,6 +29,10 @@ class GenerationCallCapExceeded(RuntimeError):
     """The finite generation budget ended before another model submission."""
 
 
+class InvalidToolActionError(RuntimeError):
+    """No selected action has valid syntax and visible tool names."""
+
+
 class EventNativeDecisionRunner:
     """Keep the draft private and journal each actual call before submission.
 
@@ -151,6 +155,10 @@ class EventNativeDecisionRunner:
                 else:
                     reconsider_started = time.perf_counter_ns()
                     try:
+                        budget_observer = getattr(self.controller, 'observe_generation_budget', None)
+                        if callable(budget_observer):
+                            budget_observer(prepared, remaining_generation_calls=(
+                                self.max_generation_calls - self.generation_calls))
                         with self._capacity_scope(key, "regeneration"):
                             reconsidered = self.controller.reconsider(
                                 prepared, list(draft.tool_calls), draft_text=draft.text,
@@ -250,8 +258,45 @@ class EventNativeDecisionRunner:
                 if capacity is not None and not rounds:
                     record['exact_recovery'].update(
                         recovery_capacity=copy.deepcopy(capacity))
+                tool_validator = getattr(self.controller, 'validate_tool_commit', None)
+                tool_fallback_original = False
+                if callable(tool_validator):
+                    tool_verdict = tool_validator(
+                        prepared, list(draft.tool_calls), draft_text=draft.text,
+                        parse_error=draft.reason if draft.status == 'malformed' else None)
+                    if tool_verdict is not None:
+                        record['tool_commit_validation'] = copy.deepcopy(tool_verdict)
+                        if not tool_verdict['accepted']:
+                            original_verdict = tool_validator(
+                                prepared, list(original_draft.tool_calls), draft_text=original_draft.text,
+                                parse_error=(original_draft.reason
+                                             if original_draft.status == 'malformed' else None))
+                            record['tool_commit_validation']['original_draft'] = copy.deepcopy(original_verdict)
+                            if not original_verdict['accepted']:
+                                raise InvalidToolActionError(
+                                    'No valid tool action after recovery: ' + tool_verdict['reason'])
+                            result, draft = original_result, original_draft
+                            final_memory = prepared.memory
+                            tool_fallback_original = True
+                            for index, trace in enumerate(record['generation_trace']):
+                                trace['discarded'] = index != 0
+                            record['tool_commit_validation'].update(
+                                fallback='original', selected_generation_index=0)
+                restore_commit = getattr(self.controller, 'restore_draft_commit', None)
+                restored_original_commit = False
+                if (capacity_rejected or tool_fallback_original) and callable(restore_commit):
+                    restored_original_commit = restore_commit(
+                        prepared, list(draft.tool_calls), draft_text=draft.text,
+                        parse_error=draft.reason if draft.status == 'malformed' else None)
+                    if restored_original_commit:
+                        record['commit_restore'] = {
+                            'reason': ('invalid_tool_action' if tool_fallback_original
+                                       else 'recovery_capacity_rejected'),
+                            'selected_generation_index': 0,
+                            'restored_original_draft_proof': True}
                 commit_validator = getattr(self.controller, 'validate_commit', None)
-                if callable(commit_validator) and not recovery_disabled and not capacity_rejected:
+                if (callable(commit_validator) and not recovery_disabled
+                        and (not capacity_rejected or restored_original_commit)):
                     commit_started = time.perf_counter_ns()
                     verdict = commit_validator(
                         prepared, list(draft.tool_calls), draft_text=draft.text,
@@ -271,6 +316,13 @@ class EventNativeDecisionRunner:
                             final_memory = prepared.memory
                             record['generation_trace'][0]['discarded'] = False
                             record['commit_validation']['selected_generation_index'] = 0
+                            if callable(restore_commit) and restore_commit(
+                                    prepared, list(draft.tool_calls), draft_text=draft.text,
+                                    parse_error=draft.reason if draft.status == 'malformed' else None):
+                                record['commit_restore'] = {
+                                    'reason': 'selected_original_after_validation',
+                                    'selected_generation_index': 0,
+                                    'restored_original_draft_proof': True}
                         elif verdict['fallback'] == 'stop':
                             # No regenerated action was accepted. Retain the
                             # original view as the next decision's memory.
@@ -288,9 +340,12 @@ class EventNativeDecisionRunner:
                         else:
                             raise ValueError('Unknown source repair commit fallback')
                     else:
-                        record['commit_validation']['selected_generation_index'] = len(record['generation_trace']) - 1
+                        record['commit_validation']['selected_generation_index'] = (
+                            0 if restored_original_commit or tool_fallback_original
+                            else len(record['generation_trace']) - 1)
                 finalize = getattr(self.controller, 'finalize_commit', None)
-                if (callable(finalize) and not recovery_disabled and not capacity_rejected
+                if (callable(finalize) and not recovery_disabled
+                        and (not capacity_rejected or restored_original_commit)
                         and draft.status != 'malformed'):
                     finalize_started = time.perf_counter_ns()
                     calls, receipt = finalize(prepared, draft.tool_calls)
@@ -306,6 +361,15 @@ class EventNativeDecisionRunner:
                         record['commit_transform']['model_generation_unmodified'] = True
                     record['controller_timing']['commit_transform_duration_ns'] = (
                         time.perf_counter_ns() - finalize_started)
+                if callable(tool_validator):
+                    final_verdict = tool_validator(
+                        prepared, list(draft.tool_calls), draft_text=draft.text,
+                        parse_error=draft.reason if draft.status == 'malformed' else None)
+                    if final_verdict is not None:
+                        record['tool_commit_final_validation'] = copy.deepcopy(final_verdict)
+                        if not final_verdict['accepted']:
+                            raise InvalidToolActionError(
+                                'Invalid final tool action: ' + final_verdict['reason'])
                 record['response'] = {
                     'role': 'assistant', 'content': draft.content,
                     'tool_calls': list(draft.tool_calls),
@@ -352,6 +416,11 @@ class EventNativeDecisionRunner:
                 if isinstance(error, GenerationCallCapExceeded):
                     record['failure_kind'] = 'budget_exhausted'
                     record['failure_code'] = 'generation_cap_reached'
+                elif isinstance(error, InvalidToolActionError):
+                    record['failure_kind'] = 'method_failure'
+                    record['failure_code'] = 'invalid_tool_action'
+                    for trace in record['generation_trace']:
+                        trace['discarded'] = True
                 self._terminal_error = copy.deepcopy(record['error'])
             raise EventNativeStepError(str(error), record) from error
         finally:

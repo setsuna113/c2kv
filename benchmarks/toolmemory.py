@@ -227,15 +227,19 @@ def validate_ready_tool_contract(
     manifest: Mapping[str, Any], spec_text: Optional[str],
     checkpoint: Optional[str | Path] = None,
     budget_tokens: Optional[int] = None,
+    tool_recovery: str = "none",
 ) -> None:
     """Ensure a supervised native child actually loaded the selected tool arm."""
     spec = parse_tool_memory_spec(spec_text)
     if spec is None:
+        if tool_recovery != "none":
+            raise RuntimeError("Tool recovery requires an active tool memory arm")
         return
     loaded = manifest.get("tool_memory_contract")
     if (not isinstance(loaded, Mapping)
             or loaded.get("spec") != spec.as_dict()
-            or loaded.get("tool_budget_tokens") != budget_tokens):
+            or loaded.get("tool_budget_tokens") != budget_tokens
+            or loaded.get("tool_recovery", "none") != tool_recovery):
         raise RuntimeError("Native tool memory contract differs from the selected tool arm")
     if spec.encoder == "t0" and checkpoint is not None:
         loaded_checkpoint = loaded.get("checkpoint")

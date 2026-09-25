@@ -116,6 +116,15 @@ def test_tool_memory_arguments_reach_supervised_child_only_when_enabled(tmp_path
     assert child.tool_memory == 't0:r8'
     assert child.tool_checkpoint == (tmp_path / 'tool-checkpoint').resolve()
     assert child.tool_budget_tokens == 256
+    recovered = server.parser().parse_args(argv + [
+        '--tool-memory', 't0:r8:uniform:schema',
+        '--tool-checkpoint', str(tmp_path / 'tool-checkpoint'),
+        '--tool-recovery', 'draft-full-raw',
+    ])
+    child = server.parser().parse_args(server._child_command(recovered)[3:])
+    assert child.tool_recovery == 'draft-full-raw'
+    assert child.tool_budget_tokens is None
+    assert plain.tool_recovery == 'none'
 
 
 @pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])

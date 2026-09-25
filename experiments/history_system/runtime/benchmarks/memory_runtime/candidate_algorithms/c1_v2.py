@@ -9,6 +9,7 @@ from .repair_protocol import RepairContext
 from .verified_binding import PROOF_REGISTRY_VERSION
 from .verified_commit import VerifiedCommitPolicy
 from ..policy import PolicyInputError
+from ..recovery.gate import canonical
 from .capacity_source_gate import POLICY_VERSION, CapacityGatedSourceAllocator
 
 
@@ -98,6 +99,45 @@ class C1V2VerifiedController(CandidateRecoveryController):
         if self._prepared.get(key) is not prepared or prepared._c1_v2_commit is None:
             raise PolicyInputError("C1 v2 commit requires this controller's reviewed decision")
         return prepared._c1_v2_commit
+
+    def invalidate_draft_commit(self, prepared, *, reason):
+        """A tool-supplemented generation cannot inherit an original-draft proof."""
+        state = self._commit_state(prepared)
+        if state.accepted or state.finalized is not None:
+            raise PolicyInputError("Cannot replace a reviewed draft after commit validation")
+        if state.receipt["status"] != "tool_recovery_preserved":
+            prepared._c1_v2_tool_original_commit = copy.copy(state)
+            # Match the incumbent's accounting of admitted regenerations.
+            # Joint history/tool recovery is one generation, not two.
+            if not prepared._c1_v2_result["regenerate"]:
+                session = prepared._store.session_id
+                self._recovery_counts[session] = self._recovery_counts.get(session, 0) + 1
+            state.eligible = False
+            state.proposal = None
+            state.receipt = {
+                "version": PROOF_REGISTRY_VERSION, "status": "tool_recovery_preserved",
+                "reason": reason, "original_draft_proposal_invalidated": True,
+                "additional_generations": 0, "additional_model_workspace_tokens": 0,
+            }
+        return copy.deepcopy(state.receipt)
+
+    def observe_tool_generation_budget(self, prepared, *, remaining_generation_calls):
+        key = (prepared._store.session_id, prepared.metadata["decision_key"])
+        if self._prepared.get(key) is not prepared:
+            raise PolicyInputError("Generation budget belongs to another controller")
+        prepared._shared_remaining_generation_calls = remaining_generation_calls
+
+    def restore_draft_commit(self, prepared, candidate_calls, *, draft_text, parse_error=None):
+        """Restore a proof only when the runner explicitly selects its original draft."""
+        state = getattr(prepared, "_c1_v2_tool_original_commit", None)
+        if state is None:
+            return False
+        self._commit_state(prepared)
+        if canonical(candidate_calls) != canonical(state.context.draft_tool_calls):
+            raise PolicyInputError("Original proof cannot be restored for another selected draft")
+        prepared._c1_v2_commit = state
+        self.commit_policy.validate(state, candidate_calls, parse_error=parse_error)
+        return True
 
     def validate_commit(self, prepared, candidate_calls, *, draft_text, parse_error=None):
         verdict = self.commit_policy.validate(self._commit_state(prepared), candidate_calls,

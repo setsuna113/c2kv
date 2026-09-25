@@ -133,6 +133,19 @@ def test_tool_on_controller_command_carries_separate_tool_checkpoint(tmp_path):
     assert command[command.index("--tool-budget-tokens") + 1] == "512"
 
 
+def test_tool_recovery_reaches_appworld_native_server_command(tmp_path):
+    config = _config(tmp_path)
+    config.update(tool_memory="t0:r8:uniform:schema",
+                  tool_checkpoint=str(tmp_path / "T0"),
+                  tool_recovery="always-full-raw")
+    (tmp_path / "controller.json").write_text("{}", encoding="utf-8")
+    command = bridge.controller_command(
+        config, "task-a", tmp_path / "native", DELIVERY,
+        tmp_path / "controller.json")
+    assert command[command.index("--tool-recovery") + 1] == "always-full-raw"
+    assert "--tool-budget-tokens" not in command
+
+
 def test_action_observations_execute_only_each_native_final_draft(tmp_path):
     task = "task-a"
     steps = tmp_path / "steps.jsonl"

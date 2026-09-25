@@ -116,6 +116,8 @@ def parser():
                         help='The separately trained T0 checkpoint, required by T0 tool memory.')
     result.add_argument('--tool-budget-tokens', type=positive_int,
                         help='Optional independent raw-tool retained-token cap.')
+    result.add_argument('--tool-recovery', choices=('none', 'draft-full-raw', 'always-full-raw'),
+                        default='none', help='Optional native tool-document supplementation after the shared draft.')
     result.add_argument('--tool-schema', choices=TOOL_SCHEMA_MODES, default=DEFAULT_TOOL_SCHEMA,
                         help='Tool prologue rendered for history-only routes: sglang-full '
                              '(release default, matches the Full SGLang actor) or raw '
@@ -408,8 +410,10 @@ def _build_generator(
 def _serve(args):
     s0_config, s0_contract = _read_s0_configuration(args)
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
-    from .event_native_tool import parse_native_tool_spec
+    from .event_native_tool import parse_native_tool_spec, validate_tool_recovery_config
     tool_spec = parse_native_tool_spec(getattr(args, 'tool_memory', None))
+    validate_tool_recovery_config(tool_spec, getattr(args, 'tool_recovery', 'none'),
+                                  getattr(args, 'tool_budget_tokens', None))
     if (tool_spec is not None and tool_spec.encoder != 't0'
             and tool_spec.interface_policy != 'schema'):
         raise ValueError(
@@ -502,6 +506,8 @@ def _serve(args):
         if tool_spec is not None:
             tool_contract = {'spec': tool_spec.as_dict(),
                              'tool_budget_tokens': getattr(args, 'tool_budget_tokens', None)}
+            if getattr(args, 'tool_recovery', 'none') != 'none':
+                tool_contract['tool_recovery'] = args.tool_recovery
             if tool_spec.encoder == 't0':
                 from .event_native_tool import shared_tool_catalog
                 tool_contract['checkpoint'] = shared_tool_catalog().load_tool_checkpoint_contract(
@@ -606,7 +612,8 @@ def _serve(args):
                 controller, tokenizer, tool_spec, model_context=context,
                 generator=generator,
                 tool_budget_tokens=getattr(args, 'tool_budget_tokens', None),
-                tool_checkpoint_contract=tool_contract.get('checkpoint'))
+                tool_checkpoint_contract=tool_contract.get('checkpoint'),
+                tool_recovery=getattr(args, 'tool_recovery', 'none'))
         if shadow_contract is not None:
             manifest['shadow_feature_contract'] = shadow_contract
         if getattr(args, 'npu_allocator_metrics', False):
@@ -756,6 +763,8 @@ def _child_command(args):
             command.extend(['--tool-checkpoint', str(args.tool_checkpoint.resolve())])
         if getattr(args, 'tool_budget_tokens', None) is not None:
             command.extend(['--tool-budget-tokens', str(args.tool_budget_tokens)])
+    if getattr(args, 'tool_recovery', 'none') != 'none':
+        command.extend(['--tool-recovery', args.tool_recovery])
     if getattr(args, 'tool_schema', DEFAULT_TOOL_SCHEMA) != DEFAULT_TOOL_SCHEMA:
         command.extend(['--tool-schema', args.tool_schema])
     if getattr(args, 'generation_backend', 'native') == 'sglang':
