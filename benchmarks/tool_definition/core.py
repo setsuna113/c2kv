@@ -13,9 +13,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from benchmarks import toolmemory
+from benchmarks import toolmemory, toolselection
 
 FULL_CONTROL_POLICY = "unmodified_full_v1"
+DEFAULT_SELECTOR_POLICY = toolselection.DEFAULT_SELECTOR_POLICY
 RUNTIME_PYTHON = Path(__file__).resolve().parents[2] / "experiments" / "history_system" / "runtime" / "python"
 
 
@@ -110,6 +111,7 @@ def pack_layout(
     row: Mapping[str, Any], tokenizer: Any, *, layout: str, ratio: int,
     k: int = 3, seed: int = 42, native_override: Sequence[int] | None = None,
     interface_policy: str = "none",
+    selector_policy: str = DEFAULT_SELECTOR_POLICY,
 ) -> dict[str, Any]:
     """Pack Full, T0, or a selected native subset on the same visible prefix."""
     EventStore, EncoderChunk, MemoryView, PackedMemory, native_ids = runtime_modules()
@@ -125,12 +127,17 @@ def pack_layout(
         raise ValueError("tools must be a nonempty list of objects")
     if ratio not in toolmemory.SUPPORTED_RATIOS:
         raise ValueError("T0 ratio must be 8 or 12")
-    spec = toolmemory.ToolMemorySpec(ratio=ratio, interface_policy=interface_policy)
+    spec = toolmemory.ToolMemorySpec(
+        ratio=ratio, layout="hybrid" if layout == "hybrid" else "uniform",
+        top_k=k if layout == "hybrid" else 0,
+        interface_policy=interface_policy, selector_policy=selector_policy,
+    )
     spec.validate()
     if layout not in {"full", "uniform", "hybrid", "random", "retrieval"}:
         raise ValueError("unknown tool layout")
     snapshots = [toolmemory.tool_snapshot(item) for item in tools]
     rank = toolmemory.lexical_rank(snapshots, toolmemory.query_text(messages))
+    selection = None
     if native_override is not None:
         native = tuple(sorted(int(index) for index in native_override))
     elif layout == "full":
@@ -139,6 +146,9 @@ def pack_layout(
         native = ()
     elif layout == "random":
         native = tuple(sorted(random_rank(len(tools), seed=seed, decision_id=decision_id)[:k]))
+    elif layout == "hybrid":
+        selection = toolmemory.tool_selection(snapshots, spec, messages)
+        native = tuple(sorted(int(index) for index in selection["native_indices"]))
     else:
         native = tuple(sorted(rank[:k]))
     if len(set(native)) != len(native) or any(not 0 <= index < len(tools) for index in native):
@@ -177,7 +187,9 @@ def pack_layout(
     result = {
         "decision_id": decision_id, "session_key": store.session_id,
         "source": row.get("source", "recorded_decision"), "layout": layout,
-        "ratio": ratio, "k": k if layout in {"hybrid", "random", "retrieval"} else None,
+        "ratio": ratio,
+        "k": (None if layout == "hybrid" and selector_policy == "last_user_adaptive_v1" else
+              k if layout in {"hybrid", "random", "retrieval"} else None),
         "seed": seed if layout == "random" else None,
         "gold_tool_calls": canonical_calls(row["gold_tool_calls"]),
         "native_indices": list(native), "lexical_rank": list(rank),
@@ -188,6 +200,19 @@ def pack_layout(
             allow_nan=False).encode("utf-8")).hexdigest(),
         "tool_names": [toolmemory.tool_name(tool) for tool in snapshots],
     }
+    if selection is not None and selector_policy != DEFAULT_SELECTOR_POLICY:
+        selector_metadata = dict(selection)
+        if selector_policy == "last_user_adaptive_v1":
+            selector_metadata.update({
+                "relative_threshold": toolselection.ADAPTIVE_RELATIVE_THRESHOLD,
+                "selection_count": len(native),
+                "top_k_cap": None,
+            })
+        result.update({
+            "selector_policy": selector_policy,
+            "selector_metadata": selector_metadata,
+            "n_native": len(native),
+        })
     if interface_policy != "none":
         result["interface_policy"] = interface_policy
         result["interface_render_profile"] = toolmemory.INTERFACE_RENDER_PROFILE
@@ -197,7 +222,8 @@ def pack_layout(
 
 def retrieval_layout(row: Mapping[str, Any], tokenizer: Any, *, ratio: int,
                      allowance_tokens: int, k: int = 3,
-                     interface_policy: str = "none") -> dict[str, Any]:
+                     interface_policy: str = "none",
+                     selector_policy: str = DEFAULT_SELECTOR_POLICY) -> dict[str, Any]:
     """Admit lexical-ranked schemas while the total resident KV fits hybrid."""
     chosen: list[int] = []
     rank = toolmemory.lexical_rank(row["tools"], toolmemory.query_text(row["messages"]))
@@ -205,12 +231,14 @@ def retrieval_layout(row: Mapping[str, Any], tokenizer: Any, *, ratio: int,
         candidate = sorted([*chosen, index])
         packed = pack_layout(row, tokenizer, layout="retrieval", ratio=ratio,
                              k=k, native_override=candidate,
-                             interface_policy=interface_policy)
+                             interface_policy=interface_policy,
+                             selector_policy=selector_policy)
         if packed["resident_kv_tokens"] <= allowance_tokens:
             chosen = candidate
     result = pack_layout(row, tokenizer, layout="retrieval", ratio=ratio,
                          k=k, native_override=chosen,
-                         interface_policy=interface_policy)
+                         interface_policy=interface_policy,
+                         selector_policy=selector_policy)
     result["allowance_tokens"] = allowance_tokens
     return result
 

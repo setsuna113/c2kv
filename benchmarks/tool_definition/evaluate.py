@@ -10,9 +10,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
-from benchmarks import toolmemory
+from benchmarks import toolmemory, toolselection
 from benchmarks.backends.sglang import SglangBackend
-from .core import FULL_CONTROL_POLICY, canonical_calls, parse_calls, sha256_file
+from .core import (DEFAULT_SELECTOR_POLICY, FULL_CONTROL_POLICY, canonical_calls,
+                   parse_calls, sha256_file)
 from .prepare import LAYOUTS, SCHEMA
 
 METHODS = ("c2kv", "streamingllm", "h2o", "snapkv", "pyramidkv")
@@ -22,13 +23,138 @@ class UpstreamUnavailable(RuntimeError):
     """The inference service cannot accept further requests."""
 
 
+def _selector_contract(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize old default manifests and validate versioned selector policies."""
+    selector = manifest.get("selector")
+    if not isinstance(selector, Mapping):
+        raise ValueError("prepared manifest lacks a valid selector contract")
+    if selector.get("ranker") != toolmemory.RANKER or type(selector.get("seed")) is not int:
+        raise ValueError("prepared manifest selector ranker or seed differs from this evaluator")
+    policy = selector.get("policy", DEFAULT_SELECTOR_POLICY)
+    try:
+        expected_version = toolselection.selector_version(policy)
+    except ValueError as exc:
+        raise ValueError("prepared manifest has an unknown selector policy") from exc
+    adaptive_fields = ("selection_count", "relative_threshold", "top_k_cap", "fixed_control_k")
+    if policy == "last_user_adaptive_v1":
+        fixed_control_k = selector.get("fixed_control_k")
+        threshold = selector.get("relative_threshold")
+        if ("k" in selector or type(fixed_control_k) is not int or fixed_control_k < 1 or
+                selector.get("selector_version") != expected_version or
+                selector.get("selection_count") != "adaptive" or
+                isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or
+                float(threshold) != toolselection.ADAPTIVE_RELATIVE_THRESHOLD or
+                selector.get("top_k_cap", object()) is not None):
+            raise ValueError("prepared adaptive selector contract differs from this evaluator")
+        runtime_top_k = fixed_control_k
+    else:
+        k = selector.get("k")
+        if type(k) is not int or k < 1 or any(name in selector for name in adaptive_fields):
+            raise ValueError("prepared fixed selector contract differs from this evaluator")
+        if ("selector_version" in selector and
+                selector.get("selector_version") != expected_version):
+            raise ValueError("prepared selector version differs from this evaluator")
+        if policy != DEFAULT_SELECTOR_POLICY and "selector_version" not in selector:
+            raise ValueError("prepared non-default selector lacks a version identity")
+        runtime_top_k = k
+    toolmemory.ToolMemorySpec(
+        ratio=8, layout="hybrid", top_k=runtime_top_k,
+        interface_policy=manifest.get("interface_policy", "none"),
+        selector_policy=policy,
+    ).validate()
+    return {"policy": policy, "runtime_top_k": runtime_top_k,
+            "frozen": dict(selector)}
+
+
+def _validate_record_selector(record: Mapping[str, Any],
+                              contract: Mapping[str, Any]) -> None:
+    policy = contract["policy"]
+    runtime_top_k = contract["runtime_top_k"]
+    if record["layout"] != "hybrid":
+        if any(name in record for name in (
+                "selector_policy", "selector_metadata", "n_native")):
+            raise ValueError("selector metadata belongs only to the hybrid layout")
+        return
+    if policy == DEFAULT_SELECTOR_POLICY:
+        if any(name in record for name in (
+                "selector_policy", "selector_metadata", "n_native")):
+            raise ValueError("default selector records must keep the legacy identity")
+        if record.get("k") != runtime_top_k:
+            raise ValueError("recorded selector count differs from manifest")
+        return
+    if record.get("selector_policy") != policy:
+        raise ValueError("recorded selector policy differs from manifest")
+    metadata = record.get("selector_metadata")
+    native = record.get("native_indices")
+    tool_names = record.get("tool_names")
+    if (not isinstance(metadata, Mapping) or not isinstance(native, list) or
+            not isinstance(tool_names, list) or
+            metadata.get("policy") != policy or
+            metadata.get("selector_version") != toolselection.selector_version(policy) or
+            list(metadata.get("native_indices", ())) != native or
+            record.get("n_native") != len(native)):
+        raise ValueError("recorded selector metadata differs from frozen layout")
+    scores, rank = metadata.get("scores"), metadata.get("rank")
+    if (not isinstance(scores, list) or len(scores) != len(tool_names) or
+            any(isinstance(score, bool) or not isinstance(score, (int, float)) for score in scores) or
+            not isinstance(rank, list) or sorted(rank) != list(range(len(tool_names))) or
+            not isinstance(metadata.get("query_sha256"), str) or
+            type(metadata.get("latest_io_present")) is not bool):
+        raise ValueError("recorded selector score identity is invalid")
+    if policy == "last_user_adaptive_v1":
+        maximum = max(scores, default=0.0)
+        expected_native = sorted(index for index, score in enumerate(scores)
+                                 if score > 0.0 and score >=
+                                 toolselection.ADAPTIVE_RELATIVE_THRESHOLD * maximum)
+        if (record.get("k") is not None or native != expected_native or
+                metadata.get("selection_count") != len(native) or
+                metadata.get("relative_threshold") !=
+                toolselection.ADAPTIVE_RELATIVE_THRESHOLD or
+                metadata.get("top_k_cap", object()) is not None):
+            raise ValueError("recorded adaptive selector metadata differs from manifest")
+    else:
+        expected_native = sorted(rank[:runtime_top_k])
+        if record.get("k") != runtime_top_k or native != expected_native:
+            raise ValueError("recorded fixed selector metadata differs from manifest")
+
+
+def _validate_live_selector(record: Mapping[str, Any], plan: Any,
+                            contract: Mapping[str, Any]) -> None:
+    """Refuse a live hybrid plan that differs from the prepared selector."""
+    if record.get("layout") != "hybrid":
+        return
+    info = getattr(plan, "info", None)
+    if not isinstance(info, Mapping) or list(info.get("native_indices", ())) != record["native_indices"]:
+        raise ValueError("live selector native indices differ from frozen layout")
+    policy = contract["policy"]
+    if policy == DEFAULT_SELECTOR_POLICY:
+        return
+    metadata = record["selector_metadata"]
+    expected = {
+        "selector_policy": policy,
+        "selector_version": metadata["selector_version"],
+        "selector_scores": metadata["scores"],
+        "selector_rank": metadata["rank"],
+        "selector_query_sha256": metadata["query_sha256"],
+        "selector_latest_io_present": metadata["latest_io_present"],
+        "score_selected_native_indices": record["native_indices"],
+    }
+    if any(info.get(name) != value for name, value in expected.items()):
+        raise ValueError("live selector policy identity differs from frozen layout")
+    if policy == "last_user_adaptive_v1" and (
+            info.get("top_k") is not None or
+            info.get("relative_threshold") != toolselection.ADAPTIVE_RELATIVE_THRESHOLD or
+            info.get("selection_count") != len(record["native_indices"])):
+        raise ValueError("live adaptive selector contract differs from frozen layout")
+
+
 def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tuple[str, int], dict[str, dict]]]:
     path = path.resolve()
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("schema") != SCHEMA or manifest.get("purpose") != "recorded_next_action_tool_definition":
         raise ValueError("not a recorded tool-definition manifest")
     interface_policy = manifest.get("interface_policy", "none")
-    toolmemory.ToolMemorySpec(ratio=8, interface_policy=interface_policy).validate()
+    selector_contract = _selector_contract(manifest)
     if interface_policy == "schema":
         if manifest.get("interface_render_profile") != toolmemory.INTERFACE_RENDER_PROFILE:
             raise ValueError("prepared tool interface render profile differs from this evaluator")
@@ -80,6 +206,7 @@ def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tu
             record = json.loads(line)
             if record.get("schema") != SCHEMA or record.get("layout") not in LAYOUTS:
                 raise ValueError("invalid tool-definition record")
+            _validate_record_selector(record, selector_contract)
             if record.get("interface_policy", "none") != interface_policy:
                 raise ValueError("recorded tool interface policy differs from manifest")
             if (interface_policy == "schema" and
@@ -321,6 +448,10 @@ def _http_result(record: Mapping[str, Any], *, method: str, layout: str,
            if "interface_render_profile" in record else {}),
         **({"full_control_policy": record["full_control_policy"]}
            if "full_control_policy" in record else {}),
+        **({"selector_policy": record["selector_policy"],
+            "selector_metadata": record["selector_metadata"],
+            "n_native": record["n_native"]}
+           if "selector_policy" in record else {}),
         "k": record["k"], "seed": record["seed"],
         "prompt_sha256": record["prompt_sha256"],
         "gold_tool_calls": gold,
@@ -407,11 +538,124 @@ def _row_key(row: Mapping[str, Any]) -> tuple[str, int, str, str]:
     return row["decision_id"], row["ratio"], row["method"], row["layout"]
 
 
+def _load_full_results(
+    donor_output: Path, *, current_identity: Mapping[str, Any],
+    selected: Mapping[tuple[str, int], Mapping[str, Mapping[str, Any]]],
+    backend: SglangBackend,
+) -> tuple[dict[tuple[str, int, str, str], dict[str, Any]], dict[str, Any]]:
+    """Load immutable Full anchors from a completed, request-identical run."""
+    donor_output = donor_output.resolve()
+    files = {
+        "run_contract": donor_output / "run_contract.json",
+        "evaluation": donor_output / "evaluation.json",
+        "results": donor_output / "results.jsonl",
+        "raw_responses": donor_output / "raw_responses.jsonl",
+        "errors": donor_output / "errors.jsonl",
+    }
+    if not donor_output.is_dir() or any(not path.is_file() for path in files.values()):
+        raise ValueError("full-results donor lacks a complete evaluation artifact set")
+    donor_contract = json.loads(files["run_contract"].read_text(encoding="utf-8"))
+    donor_report = json.loads(files["evaluation"].read_text(encoding="utf-8"))
+    if (donor_report.get("status") != "completed" or
+            donor_report.get("unresolved_rows") != 0):
+        raise ValueError("full-results donor evaluation is not complete")
+    claimed_contract_hash = donor_contract.get("evaluation_config_sha256")
+    unhashed_contract = dict(donor_contract)
+    unhashed_contract.pop("evaluation_config_sha256", None)
+    observed_contract_hash = hashlib.sha256(json.dumps(
+        unhashed_contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False).encode("utf-8")).hexdigest()
+    if claimed_contract_hash != observed_contract_hash:
+        raise ValueError("full-results donor run contract hash is invalid")
+    if (donor_report.get("evaluation_config_sha256") != claimed_contract_hash or
+            any(donor_report.get(name) != value for name, value in donor_contract.items())):
+        raise ValueError("full-results donor report differs from its run contract")
+    artifact_hashes = {
+        "run_contract_sha256": sha256_file(files["run_contract"]),
+        "evaluation_sha256": sha256_file(files["evaluation"]),
+        "results_sha256": sha256_file(files["results"]),
+        "raw_responses_sha256": sha256_file(files["raw_responses"]),
+        "errors_sha256": sha256_file(files["errors"]),
+    }
+    if (donor_report.get("results_sha256") != artifact_hashes["results_sha256"] or
+            donor_report.get("raw_responses_sha256") != artifact_hashes["raw_responses_sha256"] or
+            donor_report.get("errors_sha256") != artifact_hashes["errors_sha256"]):
+        raise ValueError("full-results donor artifacts differ from its evaluation hashes")
+    identity_fields = (
+        "upstream", "server_model", "server_model_info",
+        "checkpoint_config_sha256", "checkpoint_model_files_sha256",
+        "client_source_sha256", "max_new_tokens",
+    )
+    for name in identity_fields:
+        if donor_contract.get(name) != current_identity.get(name):
+            raise ValueError(f"full-results donor {name} differs from the current run")
+
+    donor_results: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    for row in _iter_jsonl(files["results"]):
+        key = _row_key(row)
+        if key[2:] != ("c2kv", "full"):
+            continue
+        if key in donor_results:
+            raise ValueError(f"full-results donor repeats Full result {key}")
+        if (row.get("schema") != "c2kv-paper-tool-definition-result-v2" or
+                row.get("evaluation_config_sha256") != claimed_contract_hash):
+            raise ValueError(f"full-results donor has an invalid Full result {key}")
+        donor_results[key] = row
+    donor_raw: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    for item in _iter_jsonl(files["raw_responses"]):
+        key = _row_key(item)
+        if key[2:] != ("c2kv", "full"):
+            continue
+        if key in donor_raw:
+            raise ValueError(f"full-results donor repeats Full raw response {key}")
+        if item.get("evaluation_config_sha256") != claimed_contract_hash:
+            raise ValueError(f"full-results donor has an invalid Full raw response {key}")
+        donor_raw[key] = item
+
+    cache: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    for pair_key, pair in selected.items():
+        key = (pair_key[0], pair_key[1], "c2kv", "full")
+        result, raw = donor_results.get(key), donor_raw.get(key)
+        if result is None or raw is None or not isinstance(raw.get("response"), dict):
+            raise ValueError(f"full-results donor lacks Full result and raw response for {pair_key}")
+        record = pair["full"]
+        native = record["native_indices"]
+        if (result.get("prompt_sha256") != record["prompt_sha256"] or
+                result.get("native_tool_indices") != native or
+                not isinstance(result.get("plan_info"), Mapping) or
+                result["plan_info"].get("native_indices") != native or
+                result.get("base_prompt_tokens_without_tool_protocol") !=
+                record["base_prompt_tokens_without_tool_protocol"] or
+                result.get("raw_response") != raw["response"]):
+            raise ValueError(f"full-results donor Full prompt or native layout differs for {pair_key}")
+        normalized = backend.normalize_response(raw["response"])
+        measured = _measured_kv(raw["response"], normalized, "c2kv", None)
+        if (result.get("generation_active_kv_tokens") !=
+                measured["generation_active_kv_tokens"] or
+                result.get("generation_active_kv_bytes") !=
+                measured["generation_active_kv_bytes"] or
+                result.get("full_generation_active_kv_tokens") !=
+                measured["generation_active_kv_tokens"] or
+                result.get("full_generation_active_kv_bytes") !=
+                measured["generation_active_kv_bytes"]):
+            raise ValueError(f"full-results donor Full KV receipt differs for {pair_key}")
+        cache[key] = raw["response"]
+    provenance = {
+        "schema": "c2kv-paper-tool-definition-full-reuse-v1",
+        "path": str(donor_output),
+        "donor_evaluation_config_sha256": claimed_contract_hash,
+        "reused_full_rows": len(cache),
+        **artifact_hashes,
+    }
+    return cache, provenance
+
+
 def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: str,
              max_new_tokens: int, model: str | None = None,
              methods: tuple[str, ...] = METHODS, layouts: tuple[str, ...] = LAYOUTS,
              limit: int | None = None, resume: bool = False,
-             interface_policy: str = "none") -> dict[str, Any]:
+             interface_policy: str = "none",
+             full_results: Path | None = None) -> dict[str, Any]:
     """Evaluate each frozen request; resume only under the identical run contract."""
     if (max_new_tokens < 1 or not methods or len(set(methods)) != len(methods)
             or any(item not in METHODS for item in methods)):
@@ -420,8 +664,14 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
         raise ValueError("unknown, repeated, or empty layout set")
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
-    manifest_path, checkpoint = manifest_path.resolve(), checkpoint.resolve()
+    manifest_path, checkpoint, output = (
+        manifest_path.resolve(), checkpoint.resolve(), output.resolve())
+    full_results = full_results.resolve() if full_results is not None else None
+    if full_results == output:
+        raise ValueError("full-results donor must differ from the current output")
     manifest, groups = read_manifest(manifest_path, checkpoint)
+    selector_contract = _selector_contract(manifest)
+    selector_policy = selector_contract["policy"]
     if interface_policy != manifest.get("interface_policy", "none"):
         raise ValueError("evaluation interface policy differs from prepared manifest")
     sources = _source_rows(manifest)
@@ -449,20 +699,36 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             "benchmarks/toolinterface.py": Path(__file__).resolve().parents[1] / "toolinterface.py",
             "benchmarks/toolmemory_joint.py": Path(__file__).resolve().parents[1] / "toolmemory_joint.py",
         })
+    source_files["benchmarks/toolselection.py"] = (
+        Path(toolselection.__file__))
+    client_source_sha256 = {name: sha256_file(path) for name, path in source_files.items()}
+    current_identity = {
+        "upstream": upstream, "server_model": model_id,
+        "server_model_info": server_model_info,
+        "checkpoint_config_sha256": manifest["checkpoint"]["config_sha256"],
+        "checkpoint_model_files_sha256": manifest["checkpoint"]["model_files_sha256"],
+        "client_source_sha256": client_source_sha256,
+        "max_new_tokens": max_new_tokens,
+    }
+    donor_cache: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    full_reuse = None
+    if full_results is not None:
+        donor_cache, full_reuse = _load_full_results(
+            full_results, current_identity=current_identity, selected=selected,
+            backend=client.backend)
     contract = {
         "schema": "c2kv-paper-tool-definition-run-contract-v1",
         "manifest_sha256": sha256_file(manifest_path),
-        "checkpoint_config_sha256": manifest["checkpoint"]["config_sha256"],
-        "checkpoint_model_files_sha256": manifest["checkpoint"]["model_files_sha256"],
-        "upstream": upstream, "server_model": model_id,
-        "server_model_info": server_model_info,
-        "client_source_sha256": {name: sha256_file(path) for name, path in source_files.items()},
-        "max_new_tokens": max_new_tokens,
+        **current_identity,
         "methods": list(methods), "layouts": list(layouts), "limit": limit,
+        **({"selector_policy": selector_policy,
+            "selector": selector_contract["frozen"]}
+           if selector_policy != DEFAULT_SELECTOR_POLICY else {}),
         **({"interface_policy": interface_policy,
             "interface_render_profile": toolmemory.INTERFACE_RENDER_PROFILE,
             "full_control_policy": FULL_CONTROL_POLICY}
            if interface_policy == "schema" else {}),
+        **({"full_anchor_reuse": full_reuse} if full_reuse is not None else {}),
         "selected_decision_ratio_groups": len(selected),
         "selected_unique_decisions": len({key[0] for key in selected}),
     }
@@ -487,7 +753,24 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             raise ValueError("resume output lacks raw_responses.jsonl")
         rows_count, errors_count = 0, 0
         done: set[tuple[str, int, str, str]] = set()
-        full_cache: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+        full_cache = dict(donor_cache)
+        raw_full_responses: dict[tuple[str, int, str, str], list[dict[str, Any]]] = {}
+        reused_full_raw_keys: set[tuple[str, int, str, str]] = set()
+        for item in _iter_jsonl(raw_path):
+            key = _row_key(item)
+            if key[2:] != ("c2kv", "full"):
+                continue
+            if (item.get("evaluation_config_sha256") != contract_hash or
+                    key[:2] not in selected or not isinstance(item.get("response"), dict)):
+                raise ValueError(f"resume raw responses contain a mismatched Full anchor {key}")
+            if item.get("response_origin") == "reused_full_anchor":
+                if (full_reuse is None or key not in donor_cache or
+                        item["response"] != donor_cache[key] or
+                        key in reused_full_raw_keys):
+                    raise ValueError(f"resume reused Full anchor differs from the frozen donor {key}")
+                reused_full_raw_keys.add(key)
+            raw_full_responses.setdefault(key, []).append(item["response"])
+        local_full_result_keys: set[tuple[str, int, str, str]] = set()
         for row in _iter_jsonl(rows_path):
             key = _row_key(row)
             if (row.get("evaluation_config_sha256") != contract_hash or
@@ -498,7 +781,10 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             done.add(key)
             rows_count += 1
             if key[2:] == ("c2kv", "full"):
+                if row.get("raw_response") not in raw_full_responses.get(key, ()):
+                    raise ValueError(f"resume Full result lacks its raw response {key}")
                 full_cache[key] = row["raw_response"]
+                local_full_result_keys.add(key)
         for error in _iter_jsonl(errors_path):
             key = _row_key(error)
             if (error.get("evaluation_config_sha256") != contract_hash or
@@ -514,7 +800,10 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                                  encoding="utf-8")
         for path in (rows_path, raw_path, errors_path):
             path.touch()
-        rows_count, errors_count, done, full_cache = 0, 0, set(), {}
+        rows_count, errors_count, done, full_cache = (
+            0, 0, set(), dict(donor_cache))
+        reused_full_raw_keys: set[tuple[str, int, str, str]] = set()
+        local_full_result_keys: set[tuple[str, int, str, str]] = set()
     adapters: dict[tuple[str, str, int], toolmemory.ToolMemory] = {}
     failure: BaseException | None = None
     try:
@@ -539,16 +828,24 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                 errors_count += 1
 
             def record_response(record: Mapping[str, Any], method: str, layout: str,
-                                response: dict[str, Any]) -> None:
+                                response: dict[str, Any], *, reused: bool = False) -> None:
+                key = (record["decision_id"], record["ratio"], method, layout)
+                if reused and key in reused_full_raw_keys:
+                    raise ValueError(f"reused Full raw response already exists for {key}")
                 _append_jsonl(raw_sink, {
                     "decision_id": record["decision_id"], "ratio": record["ratio"],
                     "method": method, "layout": layout,
                     "evaluation_config_sha256": contract_hash, "response": response,
+                    **({"response_origin": "reused_full_anchor",
+                        "full_anchor_reuse": full_reuse}
+                       if reused else {}),
                     **({"interface_policy": record["interface_policy"],
                         "interface_render_profile": record["interface_render_profile"],
                         "full_control_policy": record["full_control_policy"]}
                        if interface_policy == "schema" else {}),
                 })
+                if reused:
+                    reused_full_raw_keys.add(key)
 
             for key, pair in selected.items():
                 requested = expected_by_pair[key]
@@ -579,6 +876,11 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                         full_normalized = client.backend.normalize_response(full_response)
                     else:
                         full_response = cached_full
+                        if (full_key in donor_cache and
+                                full_key not in local_full_result_keys and
+                                full_key not in reused_full_raw_keys):
+                            record_response(pair["full"], "c2kv", "full", full_response,
+                                            reused=True)
                         full_normalized = client.backend.normalize_response(full_response)
                     full_measurement = _measured_kv(full_response, full_normalized, "c2kv", None)
                     if list(full_plan.info["native_indices"]) != pair["full"]["native_indices"]:
@@ -596,11 +898,16 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                         record = pair[layout]
                         try:
                             spec_layout = "hybrid" if layout in {"hybrid", "random"} else "uniform"
+                            spec_selector_policy = (selector_policy if layout == "hybrid" else
+                                                    DEFAULT_SELECTOR_POLICY)
+                            configured_top_k = (selector_contract["runtime_top_k"]
+                                                if layout == "hybrid" else record["k"])
                             spec = toolmemory.ToolMemorySpec(
                                 ratio=record["ratio"], layout=spec_layout,
-                                top_k=record["k"] if spec_layout == "hybrid" else 0,
+                                top_k=configured_top_k if spec_layout == "hybrid" else 0,
                                 encoder="t0" if method == "c2kv" else method,
                                 interface_policy=interface_policy,
+                                selector_policy=spec_selector_policy,
                             )
                             adapter_key = (method, layout, record["ratio"])
                             if adapter_key not in adapters:
@@ -622,6 +929,7 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                                     target_resident_tokens=target)
                                 if plan is None:
                                     raise ValueError(f"tool-memory adapter produced no plan for {key}/{method}/{layout}")
+                                _validate_live_selector(record, plan, selector_contract)
                                 staged = _paper_measurement_request(
                                     staged, full_staged["messages"], source["tools"],
                                     full=method != "c2kv")
