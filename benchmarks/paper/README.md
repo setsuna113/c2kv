@@ -84,6 +84,63 @@ per-chunk keys, LRU touch order, extraction budgets and telemetry. It does not
 batch encoder forwards. Native response counters report lookup calls and hit
 chunks so a pilot can verify that this path was actually exercised.
 
+With bulk lookup enabled, the engine-only opt-in
+`C2KV_NATIVE_BULK_FIRST_MISS=1` also extracts the first miss in that same RPC
+for a selected-only sequence. Remaining chunks retain their original order;
+global and projection budgets still apply. This reduces a scheduler round trip,
+not the number of encoder forwards. `bulk_first_miss_calls` reports its use.
+
+The engine-only opt-in `C2KV_NATIVE_COMPACT_RESPONSE=1` keeps the canonical
+top-level `paper_measurement` and removes its duplicate copies under
+`sglang_runtime` and `telemetry.generation`. Timing, raw-prefix receipts and
+shadow features remain present. Both engine-only options default off; record
+their environment settings alongside each run configuration. Clients that read
+the removed nested fields must use the top-level measurement before enabling
+compact responses.
+
+`C2KV_GIST_BATCH_SIZE=2` through `4` enables a FIFO extraction collector in
+the tokenizer process (default `1`, DP=1 required). Consecutive compatible
+cache misses can share one packed Qwen3 forward with document-local attention,
+positions and residuals. The packed path requires TP=1 and non-PIC Qwen3;
+unsupported groups and isolated requests retain ordinary extraction. Groups
+are bounded by four documents, 4096 raw tokens and available cache capacity.
+The collector yields one event-loop turn without a timed batching delay, so
+enabling it does not imply that real arrivals form batches. Record actual
+`extraction_batch_id` and `extraction_batch_size` receipts. Count
+`shared_gist_generation_duration_ns` once per batch ID; per-item
+`gist_generation_duration_ns` is null for packed work. Larger packed shapes
+can change floating-point results, so check generation and task outcomes as
+well as encoder timings.
+
+With both batching and `C2KV_NATIVE_BULK_FIRST_MISS` enabled, the entire
+hit-prefix/first-miss request enters the collector before its cache lookup.
+An isolated request retains the fused lookup/extraction RPC; compatible first
+misses from queued requests can share an encoder forward. The receipt reports
+`bulk_first_miss_transport=batched-fused-rpc-v1`. `bulk_first_miss_calls` counts
+materialization API calls, while batch IDs identify actual shared forwards.
+
+`C2KV_GIST_ASYNC=1` opts overlap-prewarm misses into one resident encoder worker
+with a separate CUDA stream. It supports normal and overlap scheduler loops and
+requires TP=1, PP=1, DP=1, non-PIC Qwen3 without LoRA, and concurrent paper
+telemetry when telemetry is enabled.
+The worker submits one background chunk independently of scheduler iterations;
+foreground extraction keeps its existing path. Same-key requests wait for
+publication, and flush/weight updates cannot overtake pending work. KV becomes
+visible only after the worker, final event and pool copy complete. The default is off.
+`gist_execution_mode=tp1-worker-stream-v1` in extraction measurements identifies
+this path. Its wall duration and CUDA event interval include interleaved work
+and launch gaps; neither is exclusive GPU compute time. A positive
+`gist_overlap_decode_batches` counts decode dispatches during the pending job,
+not proven kernel overlap; use a CUDA trace for that claim.
+
+`C2KV_BASE_QUERY_GRAPH=1` captures a base-only CUDA decode graph for C2KV
+non-PIC models, avoiding the discarded gist projection branch on base queries.
+The default is off. Any non-`None` projection mask, including an all-false
+mask, routes through the existing eager GPU path; direct graph replay rejects
+such masks. Explicit gist and mixed requests retain their projection semantics
+but lose graph replay with this option. Matched native and explicit gist GPU
+probes preserve the observed outputs and log probabilities exactly.
+
 Cross-turn prewarming queues exact chunks from already complete observable
 history events after a successful decision. It includes currently raw events
 that may become eligible next turn, excludes chunks already extracted by the
@@ -99,6 +156,78 @@ chunk: GPU kernels are not preempted. The feature requires one tokenizer worker
 and DP=1. Per-job receipts are journaled separately; tagged background extraction
 cost is included in the shared engine totals. This CPU-tested scheduling path
 still requires GPU measurement to establish latency or throughput benefit.
+
+### Reusing the C1 runtime and tokenization work
+
+`--async-compression` enables the separate `nonblocking-history-v1` protocol on
+`prepare` and `serve`. It works without `--cross-turn-prewarm`. Unselected
+recovery chunks are submitted to a bounded background job; native generation
+receives only its selected chunks and returns without joining unused extras.
+The legacy `--background-extras` response barrier remains available for controls.
+Each session holds a worst-case reservation for the queued chunks until their
+actual cost receipt is settled. Required selected chunks still use ordinary
+extraction, and can wait for an in-flight extraction on the shared communicator.
+
+While a draft runs, one CPU worker encodes complete events from the already
+observed source prefix. Completed results can be offered while the same native
+generation request is in flight, or at a later decision, after checking the
+session and exact source prefix. The foreground never waits for the CPU worker
+to finish. This does not predict tool results
+or move query-dependent S0 selection into the past. Foreground calls poll the GPU
+job without cancelling or joining it; task cleanup drains it. The engine pauses
+new background chunks during foreground preparation and admits overlap after
+generation produces its first output. This is scheduler overlap, not a promise
+of simultaneous GPU kernels or zero interference.
+
+Async offers bind to their native request ID and cannot begin before that
+request's generation admission. Previously materialized history handles are
+excluded from optional prewarming for the current session; required selected
+chunks still check the engine cache and may be re-extracted after eviction.
+Repeated polls for the same running job are coalesced for 50 ms. The counters
+`poll_rpc_count` and `coalesced_poll_count` distinguish real RPCs from local reuse.
+
+Decision records retain CPU lookahead intervals and foreground hook costs.
+Native telemetry records selected-extraction wall time, foreground prewarm wait,
+and generation intervals; background receipts contain each extraction interval.
+The serving manifest summarizes interval overlap separately from foreground
+waits. Overlapping wall time is not measured saved latency or exclusive GPU time.
+
+For BFCL `c1_v2_verified` with an explicit history budget of 256, add
+`--persistent-runtime` and/or `--incremental-tokenization` to both `prepare`
+and `serve`. Both options default off and ordinary `run` rejects them. Use the
+candidate route, not a PendingVerified RACER cell:
+
+```bash
+python -m benchmarks.paper serve --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens 256 \
+  --candidate-arms c1_v2_verified \
+  --native-history-budget c2kv_c1_v2_verified_r8=256 \
+  --persistent-runtime --incremental-tokenization \
+  --cells bfcl_base__c2kv_c1_v2_verified_r8_b256 --workers 2 \
+  --serve-tasks multi_turn_base_0,multi_turn_base_1,multi_turn_base_2,multi_turn_base_3
+```
+
+Prepare the same configuration first in a new output root. Persistent mode
+assigns tasks to fixed lanes and retains each lane's Python process and
+tokenizer. Every task receives a fresh controller, generator, API, budgets and
+journals. Per-task receipts point to the lane's original native artifacts.
+The reported cohort runtime includes the first lane startup and final lane
+exit; it does not remove cold initialization from throughput. At least two
+tasks per lane are needed to exercise reuse.
+
+Incremental tokenization memoizes exact, complete native chat-template calls.
+On the supported Qwen ByteLevel BPE profile, it also reuses an unchanged rendered
+system/tools prologue. The full template is rendered first, its prefix is checked
+against an independently rendered prologue, and the suffix must begin at the
+verified special-token boundary. Unsupported profiles or boundaries use full
+tokenization. Both forms share one bounded memo, cleared when the controller's
+active session changes. Ready/final manifests report activation and cache
+counters. S0 checks tokenizer configuration once around each synchronous
+view preparation; the tokenizer remains immutable during that operation.
+Calls outside this scope retain per-call configuration checks.
+Task lifecycle and BFCL phase receipts separate runtime readiness,
+harness setup, generation with tools, official scoring and cleanup. These
+diagnostics and CPU parity checks do not establish an end-to-end GPU speedup.
 
 ## Explicit bare-native ratios
 

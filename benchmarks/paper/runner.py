@@ -940,6 +940,8 @@ def paper_env(config, source):
     env["C2KV_NATIVE_BACKGROUND_EXTRAS"] = "0"
     env["C2KV_NATIVE_BULK_CACHE_LOOKUP"] = "0"
     env["C2KV_NATIVE_CROSS_TURN_PREWARM"] = "0"
+    env["C2KV_NATIVE_ASYNC_COMPRESSION"] = "0"
+    env["C2KV_INCREMENTAL_TOKENIZATION"] = "0"
     env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "0"
     env.setdefault("CUDA_HOME", "/opt/cuda")
     env["PATH"] = (str(Path(config["server_python"]).parent) + os.pathsep
@@ -1272,6 +1274,12 @@ def main(argv=None):
                         help="prepare/serve: batch consecutive native C2KV cache-hit lookups")
     parser.add_argument("--cross-turn-prewarm", action="store_true",
                         help="prepare/serve: prewarm completed history events between native decisions")
+    parser.add_argument("--async-compression", action="store_true",
+                        help="prepare/serve: prepare known history and unused gist chunks without a response barrier")
+    parser.add_argument("--persistent-runtime", action="store_true",
+                        help="prepare/serve: keep one isolated C1 v2 runtime process per lane")
+    parser.add_argument("--incremental-tokenization", action="store_true",
+                        help="prepare/serve: enable task-local native token memoization")
     args = parser.parse_args(argv)
     if args.action == "serve":
         if args.sglang_source is None:
@@ -1290,14 +1298,19 @@ def main(argv=None):
     for selected, key in ((args.native_raw_prefix_cache, "serving_native_raw_prefix_cache"),
                           (args.background_extras, "serving_background_extras"),
                           (args.bulk_cache_lookup, "serving_bulk_cache_lookup"),
-                          (args.cross_turn_prewarm, "serving_cross_turn_prewarm")):
+                          (args.cross_turn_prewarm, "serving_cross_turn_prewarm"),
+                          (args.async_compression, "serving_async_compression"),
+                          (args.persistent_runtime, "serving_persistent_runtime"),
+                          (args.incremental_tokenization, "serving_incremental_tokenization")):
         if selected:
             if args.action not in {"prepare", "serve"}:
                 parser.error("Native serving feature flags apply only to prepare/serve")
             config[key] = True
     if args.action == "run" and any(config.get(key, False) for key in (
             "serving_native_raw_prefix_cache", "serving_background_extras",
-            "serving_bulk_cache_lookup", "serving_cross_turn_prewarm")):
+            "serving_bulk_cache_lookup", "serving_cross_turn_prewarm",
+            "serving_async_compression",
+            "serving_persistent_runtime", "serving_incremental_tokenization")):
         parser.error("This config enables serving optimizations; use serve instead of run")
     if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
                                      or args.stage == "common_prefix"):

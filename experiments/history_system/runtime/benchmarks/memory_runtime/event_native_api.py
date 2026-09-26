@@ -104,6 +104,10 @@ class EventNativeAPI:
             raise ValueError("steps_path must include a file name")
 
         self.runner = runner
+        self.controlled_workload = getattr(
+            getattr(runner, "generator", None), "controlled_workload", None)
+        if os.environ.get("C2KV_NATIVE_CONTROLLED_WORKLOAD_DIR") and self.controlled_workload is None:
+            raise ValueError("Controlled workload requires the native SGLang generator")
         self.run_id = run_id
         self.model_name = model_name
         self.benchmark = benchmark
@@ -227,7 +231,11 @@ class EventNativeAPI:
 
         self.decisions_reserved += 1
         try:
+            if self.controlled_workload is not None:
+                self.controlled_workload.begin_decision(identity[0], runner_payload)
             record = self.runner.run(copy.deepcopy(runner_payload))
+            if self.controlled_workload is not None:
+                self.controlled_workload.complete_decision(record)
         except Exception as error:
             record = getattr(error, "record", None)
             if not isinstance(record, Mapping):

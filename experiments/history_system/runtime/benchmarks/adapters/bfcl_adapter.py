@@ -36,7 +36,7 @@ import os
 import shutil
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlsplit
@@ -732,6 +732,21 @@ COST_JOIN = ("explicit c2kv_eval_context.task_id join available in "
              "request_log_summary.task_costs")
 
 
+@contextmanager
+def _harness_phase(phases, name):
+    """Measure host phases separately from model decisions and tool actions."""
+    start = time.perf_counter_ns()
+    row = {"start_unix_ns": time.time_ns(), "status": "running"}
+    phases[name] = row
+    try:
+        yield
+        row["status"] = "completed"
+    finally:
+        row["duration_ns"] = time.perf_counter_ns() - start
+        if row["status"] == "running":
+            row["status"] = "failed"
+
+
 def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              mode: str = "both", run_ids: "list[str] | str | None" = None,
              model: str = SERVED_MODEL,
@@ -763,6 +778,9 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     Terminal-state check (acceptance 1): every selected entry must have a
     result row and, after evaluation, an official score row. Generation-only
     summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
+    setup_started = time.perf_counter_ns()
+    setup_unix_ns = time.time_ns()
+    phases = {}
     if mode not in ("generate", "evaluate", "both"):
         raise ValueError(f"invalid BFCL mode: {mode}")
     if generation_temperature is not None:
@@ -826,18 +844,23 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
         _write_selected_ids(project_root, selected_ids)
         selected_counts = {name: len(values) for name, values in selected_ids.items()}
         expected = sum(selected_counts.values())
+        phases["setup"] = {"start_unix_ns": setup_unix_ns, "status": "completed",
+                           "duration_ns": time.perf_counter_ns() - setup_started}
         if mode in ("generate", "both"):
-            run_cli(generate_argv(
-                handler_name, categories, ids, num_threads=num_threads,
-                temperature=generation_temperature))
-        completion = _canonicalize_completions(
-            project_root, handler_name, selected_ids)
+            with _harness_phase(phases, "generation_and_tools"):
+                run_cli(generate_argv(
+                    handler_name, categories, ids, num_threads=num_threads,
+                    temperature=generation_temperature))
+        with _harness_phase(phases, "completion_validation"):
+            completion = _canonicalize_completions(
+                project_root, handler_name, selected_ids)
         if completion["remaining"]:
             raise RuntimeError(
                 "BFCL requires valid unique completions for: "
                 + ",".join(completion["remaining"][:20]))
         if mode in ("evaluate", "both"):
-            run_cli(evaluate_argv(handler_name, categories, ids))
+            with _harness_phase(phases, "official_scoring"):
+                run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
         for category, selected in selected_counts.items():
@@ -862,6 +885,10 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             },
             "harness_telemetry": str(harness_telemetry_path),
             "completion_ledger": completion,
+            "harness_phase_timing": {
+                "schema": "bfcl-harness-phase-timing-v1", "phases": phases,
+                "scope": "Host phase durations; generation_and_tools contains model waits and tool execution. Per-tool durations remain in harness_telemetry.",
+            },
         }
         if mode == "generate":
             summary.update({"n_generated": expected, "scored": False})

@@ -49,6 +49,9 @@ class EventNativeDecisionRunner:
         self._completed = {}
         self._terminal_error = None
         self._failed_sessions = {}
+        self._history_lookahead = None
+        self._lookahead_payload = None
+        self._lookahead_ready_chunks = ()
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._terminal_error is not None:
@@ -90,11 +93,16 @@ class EventNativeDecisionRunner:
             'scope': 'One unsubmitted decision; only response is executable, no tools or scorer were invoked.',
         }
         try:
-            if getattr(self.generator, 'cross_turn_prewarm_enabled', False):
-                receipt = self.generator.reconcile_cross_turn_prewarm()
+            if (getattr(self.generator, 'cross_turn_prewarm_enabled', False)
+                    or getattr(self.generator, 'async_compression_enabled', False)):
+                sync_started = time.perf_counter_ns()
+                receipt = (self.generator.reconcile_cross_turn_prewarm(operation='poll')
+                           if getattr(self.generator, 'async_compression_enabled', False)
+                           else self.generator.reconcile_cross_turn_prewarm())
                 record['cross_turn_prewarm'] = {
                     'prior_receipt': receipt, 'submission': None,
                     'source': 'observable_current_input',
+                    'foreground_reconcile_duration_ns': time.perf_counter_ns() - sync_started,
                 }
             prepare_started = time.perf_counter_ns()
             try:
@@ -113,6 +121,8 @@ class EventNativeDecisionRunner:
                 duration_ns = time.perf_counter_ns() - prepare_started
                 record['controller_timing']['prepare_duration_ns'] = duration_ns
                 record['controller_timing']['prepare_seconds'] = duration_ns / 1e9
+            if getattr(self.generator, 'async_compression_enabled', False):
+                self._advance_history_lookahead(payload, prepared, record)
             with self.generator.decision_scope(session_id=key[0]):
                 result, draft = self._generate(prepared.memory, prepared.metadata, record, 'draft',
                     compression_chunks=getattr(prepared, 'eligible_chunks', None))
@@ -251,7 +261,8 @@ class EventNativeDecisionRunner:
                 resolve = getattr(self.generator, 'resolve_decision', None)
                 if callable(resolve):
                     record['backend_commit'] = resolve(record['response'], result=result, record=record)
-            if getattr(self.generator, 'cross_turn_prewarm_enabled', False):
+            if (getattr(self.generator, 'cross_turn_prewarm_enabled', False)
+                    and not getattr(self.generator, 'async_compression_enabled', False)):
                 record['cross_turn_prewarm']['submission'] = self._submit_cross_turn_prewarm(
                     payload, prepared, record)
             record['session_cache_after'] = self.generator.session_cache_info()
@@ -298,11 +309,72 @@ class EventNativeDecisionRunner:
 
     def close(self):
         """Release the generator's committed device and host session cache."""
-        self.generator.close_session()
+        try:
+            if self._history_lookahead is not None:
+                self._history_lookahead.close()
+                self._history_lookahead = None
+                self._lookahead_payload = None
+                self._lookahead_ready_chunks = ()
+        finally:
+            self.generator.close_session()
 
-    def _submit_cross_turn_prewarm(self, payload, prepared, record):
-        from history_memory.cross_turn_prewarm import plan_cross_turn_chunks
-        from history_memory.events import EventStore
+    def _advance_history_lookahead(self, payload, prepared, record):
+        """Retain completed work for native admission and prepare this prefix."""
+        from history_memory.history_lookahead import HistoryLookahead
+
+        started = time.perf_counter_ns()
+        if self._history_lookahead is None:
+            self._history_lookahead = HistoryLookahead(self.tokenizer)
+        worker = self._history_lookahead
+        self._lookahead_payload = None
+        self._lookahead_ready_chunks = ()
+        diagnostic = {'schema': 'history-lookahead-v1', 'poll': None, 'submission': None}
+        record['history_lookahead'] = diagnostic
+        try:
+            completed = worker.poll(session_id=payload['session_id'], messages=payload['messages'])
+            inputs = self._history_preparation_inputs(payload, prepared)
+            if completed is not None:
+                diagnostic['poll'] = {key: value for key, value in completed.items() if key != 'chunks'}
+                chunks = completed.get('chunks', ())
+                diagnostic['poll']['chunk_count'] = len(chunks)
+                if completed['status'] == 'completed' and chunks and 'reason' not in inputs:
+                    # The native client knows the concrete request rid. Let it
+                    # attach the admission gate instead of submitting while idle.
+                    self._lookahead_ready_chunks = tuple(chunks)
+                    diagnostic['offer'] = {'status': 'deferred',
+                                           'reason': 'awaiting_native_request'}
+            if 'reason' in inputs:
+                diagnostic['submission'] = inputs
+            else:
+                diagnostic['submission'] = worker.submit(**inputs)
+                self._lookahead_payload = payload
+        finally:
+            diagnostic['foreground_hook_duration_ns'] = time.perf_counter_ns() - started
+
+    def _poll_generation_history(self, record):
+        """Consume CPU work without waiting while the current HTTP call runs."""
+        ready = self._lookahead_ready_chunks
+        self._lookahead_ready_chunks = ()
+        if ready:
+            record['history_lookahead']['offer'] = {'status': 'provided_to_native',
+                                                   'chunk_count': len(ready)}
+        if self._history_lookahead is None or self._lookahead_payload is None:
+            return ready or None
+        payload = self._lookahead_payload
+        result = self._history_lookahead.poll(
+            session_id=payload['session_id'], messages=payload['messages'])
+        if result is None:
+            return ready or None
+        diagnostic = {key: value for key, value in result.items() if key != 'chunks'}
+        chunks = result.get('chunks', ())
+        diagnostic['chunk_count'] = len(chunks)
+        record['history_lookahead']['during_generation'] = diagnostic
+        if result['status'] == 'completed':
+            return (*ready, *chunks)
+        return ready or None
+
+    def _history_preparation_inputs(self, payload, prepared):
+        """Snapshot only already visible, unmodified source messages."""
         from .adapter import raw_source_cutoff
 
         controller = self.controller
@@ -328,20 +400,30 @@ class EventNativeDecisionRunner:
                     for index, message in enumerate(messages)
                     if message.get('role') not in {'system', 'developer'})):
                 return {'status': 'skipped', 'reason': 'current_source_rendering_changed'}
+        return {
+            'session_id': payload['session_id'], 'messages': messages,
+            'encoding_scope': self.generator.encoding_scope,
+            'max_chunk_tokens': geometry[0], 'chunk_overlap': geometry[1],
+            'atomic_unit_token_limit': min(
+                8192, self.generator.model_context,
+                getattr(packing, 'max_encoder_tokens', 8192),
+                getattr(packing, 'max_sequence_tokens', 8192)),
+            'source_cutoff': cutoff, 'benchmark': getattr(controller, 'benchmark', None),
+        }
+
+    def _submit_cross_turn_prewarm(self, payload, prepared, record):
+        from history_memory.cross_turn_prewarm import plan_cross_turn_chunks
+        from history_memory.events import EventStore
+
+        inputs = self._history_preparation_inputs(payload, prepared)
+        if 'reason' in inputs:
+            return inputs
+        inputs = dict(inputs)
         store = EventStore.from_messages(
-            payload['session_id'], messages,
-            benchmark=getattr(controller, 'benchmark', None))
+            inputs.pop('session_id'), inputs.pop('messages'), benchmark=inputs['benchmark'])
         try:
             chunks = plan_cross_turn_chunks(
-                store, self.tokenizer,
-                encoding_scope=self.generator.encoding_scope,
-                max_chunk_tokens=geometry[0], chunk_overlap=geometry[1],
-                atomic_unit_token_limit=min(
-                    8192, self.generator.model_context,
-                    getattr(packing, 'max_encoder_tokens', 8192),
-                    getattr(packing, 'max_sequence_tokens', 8192)),
-                source_cutoff=cutoff,
-                benchmark=getattr(controller, 'benchmark', None),
+                store, self.tokenizer, **inputs,
             )
         except (TypeError, ValueError) as error:
             return {'status': 'skipped', 'reason': 'source_encoding_unavailable',
@@ -381,6 +463,13 @@ class EventNativeDecisionRunner:
         kwargs = {}
         if compression_chunks is not None:
             kwargs['compression_chunks'] = compression_chunks
+        if getattr(self.generator, 'async_compression_enabled', False):
+            kwargs['background_chunk_provider'] = lambda: self._poll_generation_history(record)
+        if getattr(self.generator, 'background_fit_budget_enabled', False):
+            if budget['status'] != 'passed':
+                raise ValueError('Budget-fit prewarm requires a checked history budget')
+            kwargs['background_history_budget_tokens'] = (
+                budget['history_budget_bytes'] // budget['kv_bytes_per_token'])
         whole_full_tokens = metadata.get('paper_whole_full_kv_tokens')
         if whole_full_tokens is not None:
             if type(whole_full_tokens) is not int or whole_full_tokens <= 0:
@@ -393,13 +482,15 @@ class EventNativeDecisionRunner:
                 'outer_request_id': record['outer_request_id'],
             }
         generation_started_ns = time.perf_counter_ns()
+        trace['start_perf_ns'] = generation_started_ns
         try:
             result = self.generator.generate(memory, ratio=self.ratio,
                                               max_new_tokens=self.max_new_tokens, **kwargs)
         except Exception:
             trace['status'] = 'failed'
             trace['end_unix_ns'] = time.time_ns()
-            trace['duration_ns'] = time.perf_counter_ns() - generation_started_ns
+            trace['end_perf_ns'] = time.perf_counter_ns()
+            trace['duration_ns'] = trace['end_perf_ns'] - generation_started_ns
             partial = getattr(self.generator, 'last_generation_trace', None)
             if isinstance(partial, dict) and partial.get('attempt_uid') == handle.attempt_uid:
                 # Scope cleanup may still append completed release operations.
@@ -410,7 +501,8 @@ class EventNativeDecisionRunner:
             self.journal.finish(handle, 'failed')
             raise
         trace['end_unix_ns'] = time.time_ns()
-        trace['duration_ns'] = time.perf_counter_ns() - generation_started_ns
+        trace['end_perf_ns'] = time.perf_counter_ns()
+        trace['duration_ns'] = trace['end_perf_ns'] - generation_started_ns
         usage = {
             'prompt_tokens': trace['planned_resident_prompt_tokens'],
             'completion_tokens': len(result.token_ids),

@@ -15,6 +15,7 @@ import pytest
 
 from benchmarks.paper import runner, serving
 from benchmarks.paper.racer_matrix import parse_racer_policies, with_racer_methods
+from benchmarks.paper.candidate_matrix import with_candidate_methods
 from benchmarks.paper.upstream_liveness import UpstreamUnavailable
 
 TASKS = [f"multi_turn_long_context_{index}" for index in range(5)]
@@ -70,6 +71,90 @@ def test_engine_slot_cap_scales_and_paper_engine_command_stays_single_flight():
     assert paper[index] == "1" and scaled[index] == "4"
     assert scaled[:index] + scaled[index + 1:] == paper[:index] + paper[index + 1:]
     assert "--disable-radix-cache" not in scaled  # Full keeps the configured prefix cache
+
+
+def test_engine_slot_cap_override_is_independent_of_worker_count():
+    config = base_config()
+    full = cell(config, "bfcl_long_context__full")
+    fixed = dict(config, serving_engine_max_running_requests=4)
+    for workers in (4, 8):
+        command = serving.serving_server_command(fixed, Path("sglang"), full, workers)
+        assert value(command, "--max-running-requests") == "4"
+    assert value(runner.server_command(fixed, Path("sglang"), full["arm"],
+                                       full["benchmark"]), "--max-running-requests") == "1"
+
+
+@pytest.mark.parametrize("invalid", [None, 0, -1, True, 4.0, "4"])
+def test_engine_slot_cap_override_rejects_nonpositive_or_noninteger_values(invalid):
+    config = dict(base_config(), serving_engine_max_running_requests=invalid)
+    full = cell(config, "bfcl_long_context__full")
+    with pytest.raises(ValueError, match="serving_engine_max_running_requests"):
+        serving.serving_server_command(config, Path("sglang"), full, 4)
+
+
+@pytest.mark.parametrize("cell_id", ["bfcl_long_context__full",
+                                      "bfcl_long_context__racer_c2kv_pending_verified_b768"])
+def test_overlap_schedule_is_serving_only_and_default_command_is_unchanged(cell_id):
+    config = with_racer_methods(base_config(), ("c2kv",),
+                                parse_racer_policies("pending_verified"), 768)
+    selected = cell(config, cell_id)
+    source = Path("sglang")
+    default = serving.serving_server_command(config, source, selected, 4)
+    disabled = dict(config, serving_overlap_schedule=False)
+    enabled = dict(config, serving_overlap_schedule=True)
+    assert serving.serving_server_command(disabled, source, selected, 4) == default
+    assert default.count("--disable-overlap-schedule") == 1
+    assert serving.serving_server_command(enabled, source, selected, 4) == [
+        part for part in default if part != "--disable-overlap-schedule"]
+    paper = runner.server_command(config, source, selected["arm"], selected["benchmark"])
+    assert runner.server_command(enabled, source, selected["arm"], selected["benchmark"]) == paper
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "true", [], {}])
+def test_overlap_schedule_rejects_nonboolean_values(invalid):
+    config = dict(base_config(), serving_overlap_schedule=invalid)
+    full = cell(config, "bfcl_long_context__full")
+    with pytest.raises(ValueError, match="serving_overlap_schedule must be a boolean"):
+        serving.serving_server_command(config, Path("sglang"), full, 4)
+
+
+@pytest.mark.parametrize("policy", ["lru", "lfu", "slru", "priority"])
+def test_radix_eviction_policy_is_explicit_and_serving_only(policy):
+    config = base_config()
+    selected = cell(config, "bfcl_long_context__full")
+    source = Path("sglang")
+    default = serving.serving_server_command(config, source, selected, 4)
+    enabled = dict(config, serving_radix_eviction_policy=policy)
+    assert "--radix-eviction-policy" not in default
+    assert serving.serving_server_command(enabled, source, selected, 4) == [
+        *default, "--radix-eviction-policy", policy]
+    if policy == "priority":
+        assert "--disable-overlap-schedule" in default
+        assert "--disable-overlap-schedule" in serving.serving_server_command(
+            enabled, source, selected, 4)
+    assert runner.server_command(enabled, source, selected["arm"],
+                                 selected["benchmark"]) == runner.server_command(
+                                     config, source, selected["arm"], selected["benchmark"])
+
+
+def test_radix_eviction_policy_does_not_enable_disabled_cache_or_overlap():
+    config = racer_config()
+    selected = cell(config, "bfcl_long_context__racer_snapkv_pending_verified_b768")
+    source = Path("sglang")
+    default = serving.serving_server_command(config, source, selected, 4)
+    command = serving.serving_server_command(
+        dict(config, serving_radix_eviction_policy="slru"), source, selected, 4)
+    assert "--disable-radix-cache" in default and "--disable-radix-cache" in command
+    assert "--disable-overlap-schedule" in default and "--disable-overlap-schedule" in command
+    assert command == [*default, "--radix-eviction-policy", "slru"]
+
+
+@pytest.mark.parametrize("invalid", [None, True, 1, 1.0, [], {}, "", "fifo", "LRU"])
+def test_radix_eviction_policy_rejects_invalid_types_and_values(invalid):
+    config = dict(base_config(), serving_radix_eviction_policy=invalid)
+    selected = cell(config, "bfcl_long_context__full")
+    with pytest.raises(ValueError, match="serving_radix_eviction_policy"):
+        serving.serving_server_command(config, Path("sglang"), selected, 4)
 
 
 def test_full_task_command_is_the_single_task_subset_on_its_lane_with_a_local_reset():
@@ -194,6 +279,10 @@ def test_serve_cell_runs_every_task_and_writes_the_throughput_manifest(tmp_path,
     assert manifest["successful_tasks"] == 2
     assert manifest["engine_max_running_requests"] == 2
     assert manifest["measurement_scope"] == "concurrent_serving"
+    assert manifest["overlap_schedule"] is False
+    started = json.loads((directory / "started.json").read_text())
+    assert started["overlap_schedule"] is False
+    assert "--disable-overlap-schedule" in started["server_command"]
     assert manifest["status"] == "completed"
     assert manifest["engine_telemetry"]["status"] == "unavailable"
     assert manifest["runtime_scope"] == "first_task_process_start_to_last_observed_process_exit"
@@ -438,6 +527,7 @@ def test_native_feature_flags_enable_only_the_native_cell_and_preserve_full():
         "background_extras": "selected-first-response-barrier-v1",
         "bulk_cache_lookup": "bulk-cache-lookup-v1",
         "cross_turn_prewarm": "cross-turn-prewarm-v1",
+        "async_compression": None,
     }
     assert serving.serving_server_command(enabled, Path("sglang"), full, 2) == serving.serving_server_command(config, Path("sglang"), full, 2)
     assert all(value is None for value in serving.native_serving_features(enabled, full).values())
@@ -464,30 +554,238 @@ def test_feature_capability_check_rejects_older_engine(monkeypatch):
 def test_prepare_freezes_serving_features_and_regular_run_rejects_them(tmp_path):
     output = tmp_path / "prepared"
     runner.main(["prepare", "--output", str(output), "--native-raw-prefix-cache", "--background-extras",
-                 "--bulk-cache-lookup", "--cross-turn-prewarm", "--history-kv-budget-tokens", "768"])
+                 "--bulk-cache-lookup", "--cross-turn-prewarm", "--persistent-runtime",
+                 "--incremental-tokenization", "--async-compression", "--history-kv-budget-tokens", "768"])
     resolved = json.loads((output / "config.resolved.json").read_text())
     assert resolved["history_kv_budget_tokens"] == 768
     assert resolved["serving_native_raw_prefix_cache"] is True
     assert resolved["serving_background_extras"] is True
     assert resolved["serving_bulk_cache_lookup"] is True
     assert resolved["serving_cross_turn_prewarm"] is True
+    assert resolved["serving_persistent_runtime"] is True
+    assert resolved["serving_incremental_tokenization"] is True
+    assert resolved["serving_async_compression"] is True
     with pytest.raises(SystemExit):
         runner.main(["run", "--config", str(output / "config.resolved.json")])
 
 
 def test_normal_paper_environment_cannot_inherit_serving_optimizations(monkeypatch):
     for variable in ("C2KV_NATIVE_RAW_PREFIX_CACHE", "C2KV_NATIVE_BACKGROUND_EXTRAS",
-                     "C2KV_NATIVE_BULK_CACHE_LOOKUP", "C2KV_NATIVE_CROSS_TURN_PREWARM"):
+                     "C2KV_NATIVE_BULK_CACHE_LOOKUP", "C2KV_NATIVE_CROSS_TURN_PREWARM",
+                     "C2KV_INCREMENTAL_TOKENIZATION", "C2KV_NATIVE_ASYNC_COMPRESSION"):
         monkeypatch.setenv(variable, "1")
     env = runner.paper_env(base_config(), Path("engine"))
     assert env["C2KV_NATIVE_RAW_PREFIX_CACHE"] == env["C2KV_NATIVE_BACKGROUND_EXTRAS"] == "0"
     assert env["C2KV_NATIVE_BULK_CACHE_LOOKUP"] == env["C2KV_NATIVE_CROSS_TURN_PREWARM"] == "0"
+    assert env["C2KV_INCREMENTAL_TOKENIZATION"] == "0"
+    assert env["C2KV_NATIVE_ASYNC_COMPRESSION"] == "0"
+
+
+def test_persistent_runtime_accepts_only_actual_c1_v2_b256_cell(tmp_path):
+    arm = "c2kv_c1_v2_verified_r8"
+    config = runner.with_native_history_budget(
+        with_candidate_methods(base_config(), ("c1_v2_verified",)), arm, 256)
+    plan, _ = runner.prepare(config, tmp_path / "paper", tmp_path / "sglang")
+    by_id = {row["cell_id"]: row for row in plan}
+    selected = by_id[f"bfcl_base__{arm}_b256"]
+    enabled = dict(config, serving_persistent_runtime=True,
+                   serving_incremental_tokenization=True)
+    assert serving.persistent_runtime_enabled(enabled, selected)
+    command = serving.persistent_lane_command(
+        enabled, selected, TASKS[:2], Path("out/lane"), PROFILE, 1,
+        Path("out/tasks"))
+    assert value(command, "--arm") == arm
+    assert value(command, "--history-budget-tokens") == "256"
+    assert value(command, "--task-ids") == ",".join(TASKS[:2])
+    assert value(command, "--serving-task-output") == str(Path("out/tasks"))
+    assert "--persistent-runtime" in command
+    assert "--dynamic-serving-lane" not in command
+    dynamic = serving.persistent_lane_command(
+        enabled, selected, TASKS[:2], Path("out/lane"), PROFILE, 1,
+        Path("out/tasks"), dynamic=True)
+    assert value(dynamic, "--dynamic-serving-lane") == "1"
+    assert serving.dynamic_persistent_runtime_enabled(
+        dict(enabled, serving_dynamic_persistent_runtime=True), True)
+    with pytest.raises(ValueError, match="requires persistent"):
+        serving.dynamic_persistent_runtime_enabled(
+            dict(enabled, serving_dynamic_persistent_runtime=True), False)
+    for wrong in (by_id[f"bfcl_base__{arm}"], by_id["bfcl_base__full"]):
+        with pytest.raises(ValueError, match="C1 v2 verified B256"):
+            serving.persistent_runtime_enabled(enabled, wrong)
+
+
+def test_real_persistent_pool_reuses_lane_process_and_records_cold_span(tmp_path):
+    child = tmp_path / "lane.py"
+    child.write_text('''import json, os, sys, time
+from pathlib import Path
+root, tasks = Path(sys.argv[1]), sys.argv[2].split(",")
+time.sleep(0.05)
+for task in tasks:
+    out = root / task
+    out.mkdir(parents=True)
+    start = time.monotonic_ns()
+    (out / "summary_test.json").write_text(json.dumps({"n_scored": 1, "semantic_score": 1}))
+    end = time.monotonic_ns()
+    (out / "process.json").write_text(json.dumps({
+        "task_id": task, "returncode": 0, "start_monotonic_ns": start,
+        "end_monotonic_ns": end, "start_unix_ns": time.time_ns(),
+        "end_unix_ns": time.time_ns(), "output": str(out), "pid": os.getpid()}))
+''', encoding="utf-8")
+    tasks = ["one", "two", "three"]
+    directory = tmp_path / "serving"
+    rows, cold = serving.run_persistent_pool(
+        tasks,
+        lambda lane_tasks, lane, lane_dir: [
+            sys.executable, str(child), str(directory / "tasks"), ",".join(lane_tasks)],
+        directory, workers=2, env=os.environ.copy(), cwd=None,
+        monitor=lambda: None, poll_interval=0.01)
+    assert [row["task_id"] for row in rows] == tasks
+    assert [row["lane"] for row in rows] == [0, 1, 0]
+    assert rows[0]["pid"] == rows[2]["pid"] != rows[1]["pid"]
+    assert cold > 0.05
+    assert all((directory / "tasks" / task / "summary_test.json").is_file()
+               for task in tasks)
+
+
+def test_dynamic_persistent_pool_reassigns_to_idle_lane_without_restarting(tmp_path):
+    child = tmp_path / "dynamic_lane.py"
+    child.write_text('''import json, os, sys, time
+from pathlib import Path
+lane, tasks = Path(sys.argv[1]), Path(sys.argv[2])
+sequence = 0
+while True:
+    assignment = lane / f"assignment_{sequence}.json"
+    if not assignment.exists():
+        if (lane / "assignment_stop.requested").exists():
+            break
+        time.sleep(0.01)
+        continue
+    item = json.loads(assignment.read_text())
+    task = item["task_id"]
+    if task == "bad":
+        sys.exit(3)
+    time.sleep(0.5 if task == "slow" else 0.025)
+    out = tasks / task
+    out.mkdir(parents=True)
+    start = time.monotonic_ns()
+    row = {"task_id": task, "returncode": 0, "start_monotonic_ns": start,
+           "end_monotonic_ns": time.monotonic_ns(), "output": str(out), "pid": os.getpid()}
+    temporary = out / "process.tmp"
+    temporary.write_text(json.dumps(row))
+    os.replace(temporary, out / "process.json")
+    temporary = lane / f"assignment_{sequence}.complete.tmp"
+    temporary.write_text(json.dumps(item))
+    os.replace(temporary, lane / f"assignment_{sequence}.complete.json")
+    sequence += 1
+''', encoding="utf-8")
+    tasks = ["slow", "fast_a", "fast_b", "fast_c"]
+    directory = tmp_path / "serving"
+    rows, cold = serving.run_dynamic_persistent_pool(
+        tasks,
+        lambda _eligible, lane, lane_dir: [
+            sys.executable, str(child), str(lane_dir), str(directory / "tasks")],
+        directory, workers=2, env=os.environ.copy(), cwd=None,
+        monitor=lambda: None, poll_interval=0.01)
+    assert [row["task_id"] for row in rows] == tasks
+    assert [row["lane"] for row in rows] == [0, 1, 1, 1]
+    assert rows[1]["pid"] == rows[2]["pid"] == rows[3]["pid"] != rows[0]["pid"]
+    assert cold >= 0.5
+    assert len(list((directory / "tasks").glob("*/process.json"))) == len(tasks)
+
+    failed = tmp_path / "failed"
+    with pytest.raises(RuntimeError, match="exited 3"):
+        serving.run_dynamic_persistent_pool(
+            ["bad", "fast", "later"],
+            lambda _eligible, lane, lane_dir: [
+                sys.executable, str(child), str(lane_dir), str(failed / "tasks")],
+            failed, workers=2, env=os.environ.copy(), cwd=None,
+            monitor=lambda: None, poll_interval=0.01)
+    assert not (failed / "tasks" / "later" / "process.json").exists()
+
+
+def test_persistent_abort_keeps_completed_task_receipt_without_throughput(tmp_path, monkeypatch):
+    arm = "c2kv_c1_v2_verified_r8"
+    config = runner.with_native_history_budget(
+        with_candidate_methods(base_config(), ("c1_v2_verified",)), arm, 256)
+    config["serving_persistent_runtime"] = True
+    output = tmp_path / "paper"
+    plan, profile = runner.prepare(config, output, tmp_path / "sglang")
+    selected = next(row for row in plan if row["cell_id"] == f"bfcl_base__{arm}_b256")
+    monkeypatch.setattr(serving, "wait_server", lambda *args: None)
+    monkeypatch.setattr(serving, "cleanup_cell_processes", lambda *args: None)
+    monkeypatch.setattr(serving, "UpstreamLiveness", lambda *args, **kwargs: lambda: None)
+
+    def fail_pool(tasks, command_for_lane, directory, **kwargs):
+        task_dir = directory / "tasks" / tasks[0]
+        task_dir.mkdir(parents=True)
+        (task_dir / f"summary_{arm}.json").write_text(json.dumps({
+            "n_scored": 1, "semantic_score": 0.0}))
+        (task_dir / "process.json").write_text(json.dumps({
+            "task_id": tasks[0], "task_status": "method_failure",
+            "failure": {"kind": "capacity_infeasible"}, "returncode": 0,
+            "output": str(task_dir), "start_monotonic_ns": 1,
+            "end_monotonic_ns": 2, "start_unix_ns": 1, "end_unix_ns": 2}))
+        raise UpstreamUnavailable("test lane failed after one task")
+
+    monkeypatch.setattr(serving, "run_persistent_pool", fail_pool)
+    with pytest.raises(UpstreamUnavailable):
+        serving.serve_cell(config, selected, output, tmp_path / "sglang", profile,
+                           workers=1, tasks=TASKS[:2], port_offset=23000,
+                           popen=lambda *args, **kwargs: FakeProcess(0))
+    manifest = json.loads((output / "serving" / selected["cell_id"] /
+                           "workers_1" / "serving.json").read_text())
+    assert manifest["status"] == "aborted"
+    assert manifest["n_finished"] == 1 and manifest["n_unscored"] == 1
+    assert manifest["n_method_failures"] == 1
+    assert manifest["tasks"][0]["task_index"] == 0
+    assert manifest["tasks"][0]["lane"] == 0
+    assert manifest["tasks"][0]["failure"]["kind"] == "capacity_infeasible"
+    assert manifest["total_runtime_seconds"] is None
+    assert manifest["tasks_per_hour"] is None
+
+
+def test_dynamic_persistent_abort_keeps_actual_lane_assignment(tmp_path, monkeypatch):
+    arm = "c2kv_c1_v2_verified_r8"
+    config = runner.with_native_history_budget(
+        with_candidate_methods(base_config(), ("c1_v2_verified",)), arm, 256)
+    config.update(serving_persistent_runtime=True, serving_dynamic_persistent_runtime=True)
+    output = tmp_path / "paper"
+    plan, profile = runner.prepare(config, output, tmp_path / "sglang")
+    selected = next(row for row in plan if row["cell_id"] == f"bfcl_base__{arm}_b256")
+    monkeypatch.setattr(serving, "wait_server", lambda *args: None)
+    monkeypatch.setattr(serving, "cleanup_cell_processes", lambda *args: None)
+    monkeypatch.setattr(serving, "UpstreamLiveness", lambda *args, **kwargs: lambda: None)
+
+    def fail_pool(tasks, command_for_lane, directory, **kwargs):
+        task_dir = directory / "tasks" / tasks[0]
+        task_dir.mkdir(parents=True)
+        (task_dir / f"summary_{arm}.json").write_text(json.dumps({
+            "n_scored": 1, "semantic_score": 1.0}))
+        (task_dir / "process.json").write_text(json.dumps({
+            "task_id": tasks[0], "returncode": 0, "task_status": "completed",
+            "output": str(task_dir), "start_monotonic_ns": 1,
+            "end_monotonic_ns": 2, "start_unix_ns": 1,
+            "end_unix_ns": 2, "lane": 1}))
+        raise UpstreamUnavailable("test lane failed after one dynamic task")
+
+    monkeypatch.setattr(serving, "run_dynamic_persistent_pool", fail_pool)
+    with pytest.raises(UpstreamUnavailable):
+        serving.serve_cell(config, selected, output, tmp_path / "sglang", profile,
+                           workers=2, tasks=TASKS[:2], port_offset=23000,
+                           popen=lambda *args, **kwargs: FakeProcess(0))
+    manifest = json.loads((output / "serving" / selected["cell_id"] /
+                           "workers_2" / "serving.json").read_text())
+    assert manifest["status"] == "aborted"
+    assert manifest["dynamic_persistent_runtime"] is True
+    assert manifest["tasks"][0]["lane"] == 1
+    assert manifest["total_runtime_seconds"] is None
 
 
 def test_serving_records_features_and_checks_engine_before_children(tmp_path, monkeypatch):
     config = with_racer_methods(base_config(), ("c2kv",), parse_racer_policies("pending_verified"), 768)
     config.update(serving_native_raw_prefix_cache=True, serving_background_extras=True,
-                  serving_bulk_cache_lookup=True, serving_cross_turn_prewarm=True)
+                  serving_bulk_cache_lookup=True, serving_cross_turn_prewarm=True,
+                  serving_overlap_schedule=True)
     native = cell(config, "bfcl_long_context__racer_c2kv_pending_verified_b768")
     monkeypatch.setattr(serving, "wait_server", lambda *args: None)
     monkeypatch.setattr(serving, "cleanup_cell_processes", lambda *args: None)
@@ -513,6 +811,8 @@ def test_serving_records_features_and_checks_engine_before_children(tmp_path, mo
                                 workers=1, tasks=TASKS[:1], port_offset=22000,
                                 poll_interval=0, popen=popen)
     assert result["status"] == "completed"
+    assert result["overlap_schedule"] is True
+    assert "--disable-overlap-schedule" not in commands[0][0]
     assert result["native_serving_features"] == result["engine_serving_capabilities"] == verified[0]
     for _, kwargs in commands:
         assert kwargs["env"]["C2KV_NATIVE_RAW_PREFIX_CACHE"] == "1"

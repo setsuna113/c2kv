@@ -31,6 +31,7 @@ from benchmarks.arms import get_arm
 from benchmarks.native_history_budget import NativeHistoryBudget
 from benchmarks.native_tool_schema import NativeToolSchema
 from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
+from .artifact_io import atomic_json
 from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
@@ -287,10 +288,65 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
     return native, args, controller_path
 
 
-def run_closed_loop(config, benchmark, directory, requested=None):
+def run_closed_loop(config, benchmark, directory, requested=None, *,
+                    persistent_runtime=False, serving_task_output=None,
+                    dynamic_serving_lane=None):
     delivery = load_delivery()
     tasks = selected_tasks(config, benchmark, requested)
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
+    if persistent_runtime:
+        dynamic = dynamic_serving_lane is not None
+        persistent_server = delivery.PersistentTaskServer(
+            args, tasks, controller_path, **({"dynamic": True} if dynamic else {}))
+        task_stream = (_dynamic_task_assignments(directory, tasks, persistent_server)
+                       if dynamic else tasks)
+        try:
+            result = _run_closed_loop_prepared(config, benchmark, directory, task_stream, native,
+                                                args, controller_path, delivery,
+                                                persistent_server, serving_task_output,
+                                                dynamic_serving_lane)
+        except BaseException as failure:
+            try:
+                persistent_server.close()
+            except BaseException as cleanup_error:
+                if hasattr(failure, "add_note"):
+                    failure.add_note(f"Additionally, persistent lane cleanup failed: {cleanup_error}")
+            raise
+        else:
+            persistent_server.close()
+            return result
+    return _run_closed_loop_prepared(config, benchmark, directory, tasks, native,
+                                     args, controller_path, delivery, None, None)
+
+
+def _dynamic_task_assignments(directory, allowed_tasks, persistent_server):
+    allowed = set(allowed_tasks)
+    seen = set()
+    sequence = 0
+    while True:
+        assignment_path = directory / f"assignment_{sequence}.json"
+        while not assignment_path.is_file():
+            if (directory / "assignment_stop.requested").exists():
+                return
+            if persistent_server.process.poll() is not None:
+                raise RuntimeError("Persistent task server exited before the next assignment")
+            time.sleep(0.05)
+        assignment = json.loads(assignment_path.read_text(encoding="utf-8"))
+        task = assignment.get("task_id")
+        if (assignment.get("sequence") != sequence
+                or type(assignment.get("task_index")) is not int
+                or task not in allowed or task in seen):
+            raise ValueError("Invalid or duplicate dynamic C1 task assignment")
+        seen.add(task)
+        yield task
+        atomic_json(directory / f"assignment_{sequence}.complete.json", assignment,
+                    exclusive=True)
+        sequence += 1
+
+
+def _run_closed_loop_prepared(config, benchmark, directory, tasks, native, args,
+                              controller_path, delivery, persistent_server,
+                              serving_task_output, dynamic_serving_lane=None):
     receipts = []
     for task in tasks:
         task_root = native / "task_shards" / task
@@ -311,8 +367,11 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     from .c1_appworld import run_task
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
+                    kwargs = ({"persistent_server": persistent_server}
+                              if persistent_server is not None else {})
                     receipt, metrics = delivery.run_task(
-                        args, task, controller_path, termination_guard=defer_termination)
+                        args, task, controller_path, termination_guard=defer_termination,
+                        **kwargs)
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 final_path = task_root / "server" / "final.json"
                 final = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else {}
@@ -354,6 +413,31 @@ def run_closed_loop(config, benchmark, directory, requested=None):
             receipt["unified_metrics"] = metrics
             save(receipt_path, receipt)
         receipts.append(receipt)
+        if serving_task_output is not None:
+            task_output = serving_task_output / task
+            task_output.mkdir(parents=True, exist_ok=False)
+            save(task_output / f"summary_{ARM}.json", summarize_scores(benchmark, [receipt]))
+            lifecycle = json.loads((task_root / "lifecycle.json").read_text(encoding="utf-8"))
+            process_row = {
+                "task_id": task, "returncode": 0,
+                "task_status": receipt.get("status"),
+                "failure": receipt.get("failure"),
+                "start_monotonic_ns": lifecycle["started_monotonic_ns"],
+                "end_monotonic_ns": lifecycle["ended_monotonic_ns"],
+                "start_unix_ns": lifecycle["started_unix_ns"],
+                "end_unix_ns": lifecycle["ended_unix_ns"],
+                "wall_seconds": ((lifecycle["ended_monotonic_ns"]
+                                  - lifecycle["started_monotonic_ns"]) / 1e9),
+                "output": str(task_output),
+                "native_task_output": str(task_root),
+                "lifecycle": lifecycle,
+            }
+            if dynamic_serving_lane is not None:
+                process_row["lane"] = dynamic_serving_lane
+            if dynamic_serving_lane is not None:
+                atomic_json(task_output / "process.json", process_row, exclusive=True)
+            else:
+                save(task_output / "process.json", process_row)
         save(directory / f"summary_{ARM}.json", summarize_scores(benchmark, receipts))
         save(native / "result.json", {"status": "running", "tasks": receipts})
     save(native / "result.json", {"status": "completed", "tasks": receipts})
@@ -698,6 +782,11 @@ def main(argv=None):
     parser.add_argument("--proxy-port", type=int)
     parser.add_argument("--num-workers", type=int, choices=(1,), default=1)
     parser.add_argument("--task-ids", help="comma-separated official IDs for a bounded smoke/subset")
+    parser.add_argument("--persistent-runtime", action="store_true",
+                        help="serve only: reuse one lane process across isolated BFCL tasks")
+    parser.add_argument("--dynamic-serving-lane", type=int,
+                        help="serve only: accept one task at a time from the parent dispatcher")
+    parser.add_argument("--serving-task-output", type=Path)
     parser.add_argument("--prefixes", type=Path)
     parser.add_argument("--tool-memory", default="")
     parser.add_argument("--tool-checkpoint", default="")
@@ -707,6 +796,16 @@ def main(argv=None):
     parser.add_argument("--history-budget-tokens", type=int)
     args = parser.parse_args(argv)
     select_arm(args.arm)
+    if args.persistent_runtime:
+        if (args.stage != "closed_loop" or args.benchmark not in {"bfcl_base", "bfcl_long_context"}
+                or args.arm != "c2kv_c1_v2_verified_r8" or not args.task_ids
+                or args.serving_task_output is None):
+            parser.error("persistent runtime requires serving BFCL C1 v2 verified B256 tasks")
+    elif args.serving_task_output is not None:
+        parser.error("--serving-task-output requires --persistent-runtime")
+    if args.dynamic_serving_lane is not None and (
+            not args.persistent_runtime or args.dynamic_serving_lane < 0):
+        parser.error("--dynamic-serving-lane requires a nonnegative persistent lane")
     config = json.loads(args.config.read_text(encoding="utf-8"))
     config["native_arm"] = ARM
     if args.history_budget_tokens is not None:
@@ -715,6 +814,8 @@ def main(argv=None):
         if args.benchmark not in {"bfcl_base", "bfcl_long_context"}:
             parser.error("Native history budget sweep currently supports BFCL only")
         config["native_history_budget_tokens"] = budget.target_tokens
+    if args.persistent_runtime and config.get("native_history_budget_tokens") != 256:
+        parser.error("persistent runtime requires C1 v2 verified B256")
     apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)
     if args.tool_schema:
         config["tool_schema"] = NativeToolSchema(args.tool_schema).schema
@@ -729,7 +830,10 @@ def main(argv=None):
         native = run_common_prefix(config, args.benchmark, args.out, args.prefixes)
     else:
         native = run_closed_loop(config, args.benchmark, args.out,
-                                 args.task_ids.split(",") if args.task_ids else None)
+                                 args.task_ids.split(",") if args.task_ids else None,
+                                 persistent_runtime=args.persistent_runtime,
+                                 serving_task_output=args.serving_task_output,
+                                 dynamic_serving_lane=args.dynamic_serving_lane)
     from benchmarks.measurement.c1 import convert_run
     conversion = convert_run(native, args.out, benchmark=args.benchmark, arm=ARM,
                              replay=args.stage == "common_prefix")

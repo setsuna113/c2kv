@@ -335,6 +335,7 @@ def _build_generator(
     shadow_feature_config,
     tool_spec=None,
     tool_contract=None,
+    ready_phase_seconds=None,
 ):
     backend = args.generation_backend
     if backend == 'native':
@@ -357,7 +358,10 @@ def _build_generator(
             generator.configure_shadow_features(shadow_feature_config)
         return generator, loaded_profile
 
+    import_started = time.perf_counter()
     from history_memory.sglang_generator import SGLangEventNativeGenerator
+    if ready_phase_seconds is not None:
+        ready_phase_seconds['_generator_import'] = time.perf_counter() - import_started
     racer_backend_config = None
     if isinstance(s0_config, dict) and 'racer_backend' in s0_config:
         from .racer.config import BackendConfig
@@ -404,6 +408,9 @@ def _build_generator(
     return generator, profile
 
 
+_PERSISTENT_TOKENIZER = None
+
+
 def _serve(args):
     s0_config, s0_contract = _read_s0_configuration(args)
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
@@ -432,6 +439,8 @@ def _serve(args):
         raise ValueError('Native bare ACEBench requires SGLang for its source sampling contract')
     _validate_allocator_device(args)
     started = time.monotonic()
+    phase_started = time.perf_counter()
+    ready_phase_seconds = {}
     deadline = started + args.max_wall_seconds
     task_ids = tuple(item.strip() for item in args.task_ids.split(','))
     if not args.run_id.strip() or not args.model_name.strip():
@@ -487,7 +496,7 @@ def _serve(args):
         'scope': 'Final event-native assistant transport; tools and scoring remain in the external official harness.',
     }
     save_json(args.out / 'startup.json', manifest)
-    server = api = generator = None
+    server = api = generator = runner = None
     stop_requested = False
     old_handlers = {}
 
@@ -525,6 +534,8 @@ def _serve(args):
         runtime_packing = resolve_eval_packing(profile, getattr(args, 'eval_capacity', None))
         manifest['runtime_packing_contract'] = runtime_packing
         save_json(args.out / 'startup.json', manifest)
+        ready_phase_seconds['pre_import_setup'] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         from transformers import AutoTokenizer
         from .event_native_api import EventNativeAPI, make_server
         controller_factory = build_event_native_controller
@@ -547,7 +558,24 @@ def _serve(args):
             if args.device.split(':', 1)[0] == 'npu':
                 import torch_npu  # Register the explicitly selected optional device backend.
             torch.set_num_threads(args.torch_threads)
-        tokenizer = AutoTokenizer.from_pretrained(str(args.checkpoint), local_files_only=True)
+        ready_phase_seconds['deferred_imports'] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
+        if getattr(args, '_persistent_lane', False):
+            # The lane process repeats complete task lifecycles. Only the
+            # immutable tokenizer survives between them; controller, runner,
+            # generator, journals and budgets are recreated below.
+            global _PERSISTENT_TOKENIZER
+            identity = str(args.checkpoint.resolve())
+            if _PERSISTENT_TOKENIZER is None:
+                _PERSISTENT_TOKENIZER = (identity, AutoTokenizer.from_pretrained(
+                    identity, local_files_only=True))
+            elif _PERSISTENT_TOKENIZER[0] != identity:
+                raise ValueError('Persistent lane cannot switch checkpoints')
+            tokenizer = _PERSISTENT_TOKENIZER[1]
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(str(args.checkpoint), local_files_only=True)
+        ready_phase_seconds['tokenizer_acquisition'] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         s0_kwargs = {}
         if s0_config is not None:
             from .event_native_always import NATIVE_S0_MODE
@@ -562,6 +590,21 @@ def _serve(args):
             **s0_kwargs,
             **_route_kwargs(source_profile, args.view_mode, compression_policy,
                             history_view_protocol))
+        if os.environ.get('C2KV_INCREMENTAL_TOKENIZATION') == '1':
+            target = controller
+            seen = set()
+            while id(target) not in seen:
+                seen.add(id(target))
+                enable = getattr(target, 'enable_native_token_cache', None)
+                if callable(enable):
+                    enable()
+                    break
+                target = getattr(target, 'base', getattr(target, 'inner', None))
+                if target is None:
+                    raise RuntimeError('Controller has no native token cache capability')
+            else:
+                raise RuntimeError('Controller wrapper cycle prevents native token cache')
+            manifest['incremental_tokenization'] = {'enabled': True, 'scope': 'task_local_controller'}
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
             candidate_identity, baseline_identity = _candidate_ready_contract(candidate)
@@ -588,6 +631,7 @@ def _serve(args):
             shadow_feature_config=shadow_feature_config,
             tool_spec=tool_spec,
             tool_contract=tool_contract,
+            ready_phase_seconds=ready_phase_seconds,
         )
         if tool_spec is not None:
             generator._ensure_model_info()
@@ -649,18 +693,28 @@ def _serve(args):
             **source_kwargs)
         if isinstance(s0_config, dict) and ('candidate_algorithm' in s0_config or 'racer_backend' in s0_config):
             api.route_contract = dict(manifest['route_contract'])
+        setup_finished = time.perf_counter()
+        generator_import_seconds = ready_phase_seconds.pop('_generator_import', 0.0)
+        ready_phase_seconds['deferred_imports'] += generator_import_seconds
+        ready_phase_seconds['controller_generator_setup'] = (
+            setup_finished - phase_started - generator_import_seconds
+        )
+        phase_started = setup_finished
         server = make_server(api, host=args.host, port=args.port)
         server.timeout = 0.25
         for signum in (signal.SIGINT, signal.SIGTERM):
             old_handlers[signum] = signal.signal(signum, request_stop)
         host, port = server.server_address[:2]
         url_host = f'[{host}]' if ':' in host else host
+        ready_phase_seconds['server_bind_ready_preparation'] = time.perf_counter() - phase_started
         manifest.update(status='ready', checkpoint=profile, base_url=f'http://{url_host}:{port}/v1',
-                        ready_elapsed_seconds=time.monotonic() - started)
+                        ready_elapsed_seconds=time.monotonic() - started,
+                        ready_phase_seconds=ready_phase_seconds)
         save_json(args.out / 'ready.json', manifest)
         print(json.dumps({'status': 'ready', 'base_url': manifest['base_url'],
                           'ready_file': str((args.out / 'ready.json').resolve())}), flush=True)
-        while not stop_requested and time.monotonic() < deadline:
+        stop_file = args.out / 'persistent_task_stop.requested' if getattr(args, '_persistent_lane', False) else None
+        while not stop_requested and time.monotonic() < deadline and not (stop_file and stop_file.exists()):
             health = api.health()
             if _stop_for_health(health):
                 break
@@ -669,7 +723,8 @@ def _serve(args):
         manifest.update(status='stopped', api_health=health,
                         stop_reason='signal' if stop_requested else
                         health['terminal_reason'] if health['terminal'] else
-                        'decision_cap' if health['decisions_reserved'] >= args.max_decisions else 'wall_cap')
+                        'decision_cap' if health['decisions_reserved'] >= args.max_decisions else
+                        'task_completed' if stop_file and stop_file.exists() else 'wall_cap')
     except BaseException as error:
         manifest.update(status='failed', error={'type': type(error).__name__, 'message': str(error)})
         raise
@@ -678,7 +733,10 @@ def _serve(args):
             server.server_close()
         if generator is not None:
             manifest['session_cache_before_close'] = generator.session_cache_info()
-            generator.close_session()
+            if runner is not None:
+                runner.close()
+            else:
+                generator.close_session()
             manifest['session_cache_after_close'] = generator.session_cache_info()
         for signum, old in old_handlers.items():
             signal.signal(signum, old)
@@ -687,6 +745,18 @@ def _serve(args):
         manifest['journal_summary'] = summarize_attempt_journal(journal_path) if journal_path.exists() else None
         if api is not None:
             manifest['api_health'] = api.health()
+        if manifest.get('incremental_tokenization', {}).get('enabled') and 'controller' in locals():
+            target = controller
+            seen = set()
+            while id(target) not in seen:
+                seen.add(id(target))
+                info = getattr(target, 'token_cache_info', None)
+                if callable(info):
+                    manifest['incremental_tokenization']['cache'] = info()
+                    break
+                target = getattr(target, 'base', getattr(target, 'inner', None))
+                if target is None:
+                    break
         try:
             manifest['cost_summary'] = _saved_cost_summary(args.out)
         except Exception as error:

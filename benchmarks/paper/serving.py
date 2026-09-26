@@ -4,7 +4,8 @@ The paper matrix runs single-flight so that per-request telemetry can attribute
 peaks to one request. A serving run keeps every task's command unchanged: each
 official task runs as its own single-task child (its own proxy, its own
 official harness), at most ``workers`` children run at once, and all of them
-share one engine whose request-slot cap is scaled by ``workers``. Each running
+share one engine whose request-slot cap defaults to scaling by ``workers`` and
+can be fixed independently through configuration. Each running
 child binds its lane's proxy port. Per-request peak fields in the engine ledger
 are engine-wide under concurrency; the serving manifest records per-task wall
 times, exit codes and scores, from which task throughput and total runtime
@@ -33,17 +34,20 @@ from .runner import (
 from .task_subsets import is_subset
 from .racer_matrix import is_racer_arm, parse_racer_arm_name
 from .serving_measurement import aggregate_engine_ledger
+from .async_measurement import summarize_async_compression
 from .upstream_liveness import UpstreamLiveness
 
 SCHEMA = "paper-serving-v2"
 # Per-task children need a single-task entry point on both the native (c1
 # --task-ids) and the proxy (run.py --run-ids) paths; BFCL has both.
 SERVING_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context"})
+RADIX_EVICTION_POLICIES = frozenset({"lru", "lfu", "slru", "priority"})
 FEATURES = {
     "raw_prefix_cache": ("serving_native_raw_prefix_cache", "C2KV_NATIVE_RAW_PREFIX_CACHE", "raw-prefix-v1"),
     "background_extras": ("serving_background_extras", "C2KV_NATIVE_BACKGROUND_EXTRAS", "selected-first-response-barrier-v1"),
     "bulk_cache_lookup": ("serving_bulk_cache_lookup", "C2KV_NATIVE_BULK_CACHE_LOOKUP", "bulk-cache-lookup-v1"),
     "cross_turn_prewarm": ("serving_cross_turn_prewarm", "C2KV_NATIVE_CROSS_TURN_PREWARM", "cross-turn-prewarm-v1"),
+    "async_compression": ("serving_async_compression", "C2KV_NATIVE_ASYNC_COMPRESSION", "nonblocking-history-v1"),
 }
 
 
@@ -76,15 +80,35 @@ def require_native_serving_features(port, requested):
     return reported
 
 
+def serving_overlap_schedule_enabled(config):
+    enabled = config.get("serving_overlap_schedule", False)
+    if type(enabled) is not bool:
+        raise ValueError("serving_overlap_schedule must be a boolean")
+    return enabled
+
+
 def serving_server_command(config, source, cell, workers):
-    """The cell's engine command with its request-slot cap scaled by ``workers``."""
+    """The cell's engine command with an optional fixed request-slot cap."""
     command = server_command(config, source, cell["arm"], cell["benchmark"],
                              tool_checkpoint=cell.get("tool_checkpoint"),
                              tool_memory=cell.get("tool_memory"))
     index = command.index("--max-running-requests") + 1
-    command[index] = str(int(command[index]) * workers)
+    if "serving_engine_max_running_requests" in config:
+        cap = config["serving_engine_max_running_requests"]
+        if type(cap) is not int or cap <= 0:
+            raise ValueError("serving_engine_max_running_requests must be a positive integer")
+    else:
+        cap = int(command[index]) * workers
+    command[index] = str(cap)
     if native_serving_features(config, cell)["raw_prefix_cache"] is not None:
         command = [part for part in command if part != "--disable-radix-cache"]
+    if serving_overlap_schedule_enabled(config):
+        command.remove("--disable-overlap-schedule")
+    if "serving_radix_eviction_policy" in config:
+        policy = config["serving_radix_eviction_policy"]
+        if type(policy) is not str or policy not in RADIX_EVICTION_POLICIES:
+            raise ValueError("serving_radix_eviction_policy must be one of lru, lfu, slru, priority")
+        command += ["--radix-eviction-policy", policy]
     return command
 
 
@@ -101,6 +125,201 @@ def task_command(config, cell, task, directory, profile_path, lane):
     # engine that the other lanes are still using.
     return run_command(lane_config, dict(cell, task_ids=[task]), directory,
                        profile_path) + ["--shared-engine"]
+
+
+def persistent_runtime_enabled(config, cell):
+    value = config.get("serving_persistent_runtime", False)
+    if type(value) is not bool:
+        raise ValueError("serving_persistent_runtime must be a boolean")
+    if value and (cell["arm"] != "c2kv_c1_v2_verified_r8"
+                  or cell.get("history_budget_tokens") != 256
+                  or cell["benchmark"] not in SERVING_BENCHMARKS):
+        raise ValueError("Persistent runtime supports BFCL C1 v2 verified B256 only")
+    return value
+
+
+def dynamic_persistent_runtime_enabled(config, persistent_runtime):
+    value = config.get("serving_dynamic_persistent_runtime", False)
+    if type(value) is not bool:
+        raise ValueError("serving_dynamic_persistent_runtime must be a boolean")
+    if value and not persistent_runtime:
+        raise ValueError("Dynamic persistent dispatch requires persistent C1 runtime")
+    return value
+
+
+def persistent_lane_command(config, cell, tasks, directory, profile_path, lane,
+                            task_output, *, dynamic=False):
+    lane_config = dict(config, proxy_port=config["proxy_port"] + lane)
+    command = (run_command(lane_config, cell, directory, profile_path)
+               + ["--task-ids", ",".join(tasks), "--persistent-runtime",
+                  "--serving-task-output", str(task_output)])
+    if dynamic:
+        command += ["--dynamic-serving-lane", str(lane)]
+    return command
+
+
+def run_persistent_pool(tasks, command_for_lane, directory, *, workers, env, cwd,
+                        monitor, poll_interval=0.1, popen=subprocess.Popen):
+    """Run one persistent C1 child per lane and retain per-task receipts."""
+    assignments = [tasks[lane::workers] for lane in range(workers)]
+    running = {}
+    first_start = last_end = None
+    try:
+        for lane, lane_tasks in enumerate(assignments):
+            if not lane_tasks:
+                continue
+            lane_dir = directory / "lanes" / f"lane_{lane}"
+            lane_dir.mkdir(parents=True, exist_ok=False)
+            command = command_for_lane(lane_tasks, lane, lane_dir)
+            log = (lane_dir / "child.log").open("w", encoding="utf-8")
+            try:
+                started = time.monotonic_ns()
+                first_start = started if first_start is None else min(first_start, started)
+                process = popen(command, env=env, cwd=cwd, stdout=log,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=os.name == "posix")
+            except BaseException:
+                log.close()
+                raise
+            running[lane] = (process, log)
+            atomic_json(lane_dir / "started.json", {
+                "lane": lane, "tasks": lane_tasks, "command": command,
+                "start_monotonic_ns": started})
+        while running:
+            time.sleep(poll_interval)
+            for lane, (process, log) in list(running.items()):
+                code = process.poll()
+                if code is None:
+                    continue
+                last_end = time.monotonic_ns()
+                del running[lane]
+                try:
+                    stop_owned_group(process)
+                finally:
+                    log.close()
+                atomic_json(directory / "lanes" / f"lane_{lane}" / "process.json",
+                            {"lane": lane, "returncode": code,
+                             "end_monotonic_ns": last_end})
+                if code != 0:
+                    raise RuntimeError(f"Persistent C1 lane {lane} exited {code}")
+            if running:
+                monitor()
+    except BaseException as failure:
+        for process, log in running.values():
+            try:
+                stop_owned_group(process)
+            except Exception as error:
+                if hasattr(failure, "add_note"):
+                    failure.add_note(f"Additionally, stopping persistent lane failed: {error}")
+            finally:
+                log.close()
+        raise
+    rows = []
+    for index, task in enumerate(tasks):
+        path = directory / "tasks" / task / "process.json"
+        if not path.is_file():
+            raise RuntimeError(f"Persistent lane did not record task {task!r}")
+        row = json.loads(path.read_text(encoding="utf-8"))
+        rows.append(dict(row, task_index=index, lane=index % workers))
+    return rows, (last_end - first_start) / 1e9
+
+
+def run_dynamic_persistent_pool(tasks, command_for_lane, directory, *, workers, env, cwd,
+                                monitor, poll_interval=0.1, popen=subprocess.Popen):
+    """Dispatch each task to the next idle persistent lane without retries."""
+    pending = deque(enumerate(tasks))
+    running = {}
+    active = {}
+    next_sequence = {}
+    stopping = set()
+    rows = []
+    first_start = last_end = None
+
+    def dispatch(lane):
+        lane_dir = directory / "lanes" / f"lane_{lane}"
+        if pending:
+            index, task = pending.popleft()
+            sequence = next_sequence[lane]
+            next_sequence[lane] += 1
+            active[lane] = (sequence, index, task)
+            atomic_json(lane_dir / f"assignment_{sequence}.json", {
+                "sequence": sequence, "task_index": index, "task_id": task},
+                exclusive=True)
+        else:
+            (lane_dir / "assignment_stop.requested").touch(exist_ok=False)
+            stopping.add(lane)
+
+    try:
+        for lane in range(min(workers, len(tasks))):
+            lane_dir = directory / "lanes" / f"lane_{lane}"
+            lane_dir.mkdir(parents=True, exist_ok=False)
+            command = command_for_lane(tasks, lane, lane_dir)
+            log = (lane_dir / "child.log").open("w", encoding="utf-8")
+            try:
+                started = time.monotonic_ns()
+                first_start = started if first_start is None else min(first_start, started)
+                process = popen(command, env=env, cwd=cwd, stdout=log,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=os.name == "posix")
+            except BaseException:
+                log.close()
+                raise
+            running[lane] = (process, log)
+            next_sequence[lane] = 0
+            atomic_json(lane_dir / "started.json", {
+                "lane": lane, "eligible_tasks": tasks, "command": command,
+                "dispatch": "dynamic", "start_monotonic_ns": started})
+            dispatch(lane)
+
+        while running:
+            time.sleep(poll_interval)
+            for lane, (process, log) in list(running.items()):
+                lane_dir = directory / "lanes" / f"lane_{lane}"
+                assigned = active.get(lane)
+                if assigned is not None:
+                    sequence, index, task = assigned
+                    marker = lane_dir / f"assignment_{sequence}.complete.json"
+                    if marker.is_file():
+                        completed = json.loads(marker.read_text(encoding="utf-8"))
+                        if completed != {"sequence": sequence, "task_index": index,
+                                         "task_id": task}:
+                            raise RuntimeError(f"Persistent C1 lane {lane} returned a different task")
+                        path = directory / "tasks" / task / "process.json"
+                        row = json.loads(path.read_text(encoding="utf-8"))
+                        if row.get("task_id") != task or row.get("returncode") != 0:
+                            raise RuntimeError(f"Persistent C1 lane {lane} wrote an invalid task receipt")
+                        rows.append(dict(row, task_index=index, lane=lane))
+                        del active[lane]
+                        if process.poll() is None:
+                            dispatch(lane)
+                code = process.poll()
+                if code is None:
+                    continue
+                if lane in active or lane not in stopping or code != 0:
+                    raise RuntimeError(f"Persistent C1 lane {lane} exited {code} before completion")
+                last_end = time.monotonic_ns()
+                del running[lane]
+                try:
+                    stop_owned_group(process)
+                finally:
+                    log.close()
+                atomic_json(lane_dir / "process.json", {
+                    "lane": lane, "returncode": code, "end_monotonic_ns": last_end})
+            if running:
+                monitor()
+    except BaseException as failure:
+        for process, log in running.values():
+            try:
+                stop_owned_group(process)
+            except Exception as error:
+                if hasattr(failure, "add_note"):
+                    failure.add_note(f"Additionally, stopping persistent lane failed: {error}")
+            finally:
+                log.close()
+        raise
+    if len(rows) != len(tasks):
+        raise RuntimeError("Persistent C1 dynamic pool did not complete every task")
+    return sorted(rows, key=lambda row: row["task_index"]), (last_end - first_start) / 1e9
 
 
 def _validate_task_id(task):
@@ -217,13 +436,17 @@ def summarize(cell, workers, max_running_requests, ports, tasks, rows):
                        "are engine-wide and are not per-request or continuous memory peaks."),
         "n_tasks": len(tasks), "n_finished": len(rows),
         "n_failed": sum(row["returncode"] != 0 for row in rows),
+        "n_method_failures": sum(row.get("task_status") == "method_failure" for row in rows),
+        "n_harness_failures": sum(row.get("task_status") == "harness_failure" for row in rows),
         "n_scored": len(scored),
         "n_unscored": len(tasks) - len(scored),
         "successful_tasks": sum(row["semantic_score"] for row in scored),
         "total_runtime_seconds": runtime,
         "tasks_per_hour": len(scored) / hours if hours else None,
         "successful_tasks_per_hour": sum(row["semantic_score"] for row in scored) / hours if hours else None,
-        "status": "completed" if len(scored) == len(tasks) else "completed_with_failures",
+        "status": ("completed" if len(scored) == len(tasks)
+                   and all(row.get("task_status") not in {"method_failure", "harness_failure"}
+                           for row in rows) else "completed_with_failures"),
         "tasks": rows,
     }
 
@@ -238,6 +461,14 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
     source = Path(source).resolve()
     profile_path = Path(profile_path).resolve()
     features = native_serving_features(config, cell)
+    persistent_runtime = persistent_runtime_enabled(config, cell)
+    dynamic_persistent_runtime = dynamic_persistent_runtime_enabled(config, persistent_runtime)
+    incremental = config.get("serving_incremental_tokenization", False)
+    if type(incremental) is not bool:
+        raise ValueError("serving_incremental_tokenization must be a boolean")
+    if incremental and (cell["arm"] != "c2kv_c1_v2_verified_r8"
+                        or cell.get("history_budget_tokens") != 256):
+        raise ValueError("Incremental tokenization supports C1 v2 verified B256 only")
     if type(workers) is not int or workers < 1:
         raise ValueError("workers must be a positive integer")
     if cell["benchmark"] not in SERVING_BENCHMARKS:
@@ -264,6 +495,7 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
     if config["server_port"] in ports:
         raise ValueError("Lane proxy ports overlap the engine port")
     server_cmd = serving_server_command(config, source, cell, workers)
+    overlap_schedule = serving_overlap_schedule_enabled(config)
     max_running = int(server_cmd[server_cmd.index("--max-running-requests") + 1])
     directory = Path(output) / "serving" / cell["cell_id"] / f"workers_{workers}"
     directory.mkdir(parents=True, exist_ok=True)
@@ -271,6 +503,9 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
         "schema": SCHEMA, "cell": cell, "config": config, "workers": workers,
         "tasks": list(tasks), "lane_proxy_ports": ports, "server_command": server_cmd,
         "native_serving_features": features,
+        "overlap_schedule": overlap_schedule,
+        "persistent_runtime": persistent_runtime,
+        "dynamic_persistent_runtime": dynamic_persistent_runtime,
         "port_offset": port_offset, "sglang_source": str(source), "time": time.time()},
         exclusive=True)
     for port in (config["server_port"], *ports):
@@ -284,6 +519,7 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
     env["C2KV_PAPER_CONCURRENT"] = "1"
     for feature, (_, variable, _) in FEATURES.items():
         env[variable] = "1" if features[feature] is not None else "0"
+    env["C2KV_INCREMENTAL_TOKENIZATION"] = "1" if incremental else "0"
     native = is_native_arm(cell["arm"])
     capabilities = None
     with (directory / "server.log").open("w") as log:
@@ -297,13 +533,24 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
             monitor = UpstreamLiveness(f"http://127.0.0.1:{config['server_port']}", process=server)
             if get_arm(cell["arm"]).text_history_budget_tokens is not None:
                 require_budget_renderer(config["server_port"])
-            rows = run_pool(
-                tasks,
-                lambda task, lane, task_dir: task_command(
-                    config, cell, task, task_dir, profile_path, lane),
-                lambda task: directory / "tasks" / task,
-                workers=workers, env=env, cwd=ROOT.parent if native else None,
-                monitor=monitor, poll_interval=poll_interval, popen=popen)
+            if persistent_runtime:
+                pool = (run_dynamic_persistent_pool if dynamic_persistent_runtime
+                        else run_persistent_pool)
+                rows, cold_runtime = pool(
+                    tasks,
+                    lambda lane_tasks, lane, lane_dir: persistent_lane_command(
+                        config, cell, lane_tasks, lane_dir, profile_path, lane,
+                        directory / "tasks", dynamic=dynamic_persistent_runtime),
+                    directory, workers=workers, env=env, cwd=ROOT.parent,
+                    monitor=monitor, poll_interval=poll_interval, popen=popen)
+            else:
+                rows = run_pool(
+                    tasks,
+                    lambda task, lane, task_dir: task_command(
+                        config, cell, task, task_dir, profile_path, lane),
+                    lambda task: directory / "tasks" / task,
+                    workers=workers, env=env, cwd=ROOT.parent if native else None,
+                    monitor=monitor, poll_interval=poll_interval, popen=popen)
         except BaseException:
             run_failure = sys.exc_info()
         finally:
@@ -320,18 +567,49 @@ def serve_cell(config, cell, output, source, profile_path, *, workers, tasks,
             # engine disappears. An aborted run must not publish a throughput.
             completed = [json.loads(path.read_text(encoding="utf-8"))
                          for path in (directory / "tasks").glob("*/process.json")]
+            if persistent_runtime:
+                task_indices = {task: index for index, task in enumerate(tasks)}
+                completed = [dict(row, task_index=task_indices[row["task_id"]],
+                                  lane=(row["lane"] if dynamic_persistent_runtime
+                                        else task_indices[row["task_id"]] % workers))
+                             for row in completed if row.get("task_id") in task_indices]
             manifest = summarize(cell, workers, max_running, ports, tasks, completed)
             manifest.update(status="aborted", error=f"{type(error).__name__}: {error}",
                             total_runtime_seconds=None, tasks_per_hour=None,
                             successful_tasks_per_hour=None,
                             native_serving_features=features,
+                            overlap_schedule=overlap_schedule,
+                            persistent_runtime=persistent_runtime,
+                            dynamic_persistent_runtime=dynamic_persistent_runtime,
+                            incremental_tokenization=incremental,
                             engine_serving_capabilities=capabilities,
                             engine_telemetry=aggregate_engine_ledger(directory / telemetry_name))
+            if features['async_compression'] is not None:
+                manifest['async_compression_measurement'] = summarize_async_compression(directory)
             atomic_json(directory / "serving.json", manifest)
             raise error.with_traceback(traceback)
     manifest = summarize(cell, workers, max_running, ports, tasks, rows)
+    if persistent_runtime:
+        manifest["runtime_scope"] = "first_lane_process_start_to_last_lane_process_exit"
+        manifest["scope_note"] = (
+            "Cold lane runtime includes Python startup, task-local controller initialization, "
+            "official harness/tools/scoring, conversion and lane cleanup; shared engine startup "
+            "is excluded. Each task has fresh controller, generator, API, session and budgets. "
+            f"{'Dynamic' if dynamic_persistent_runtime else 'Static round-robin'} lane "
+            "assignment is recorded per task; per-request memory peaks "
+            "remain engine-wide under concurrency.")
+        manifest["total_runtime_seconds"] = cold_runtime
+        hours = cold_runtime / 3600 if cold_runtime else None
+        manifest["tasks_per_hour"] = manifest["n_scored"] / hours if hours else None
+        manifest["successful_tasks_per_hour"] = manifest["successful_tasks"] / hours if hours else None
+    manifest["persistent_runtime"] = persistent_runtime
+    manifest["dynamic_persistent_runtime"] = dynamic_persistent_runtime
+    manifest["incremental_tokenization"] = incremental
     manifest["native_serving_features"] = features
+    manifest["overlap_schedule"] = overlap_schedule
     manifest["engine_serving_capabilities"] = capabilities
     manifest["engine_telemetry"] = aggregate_engine_ledger(directory / telemetry_name)
+    if features['async_compression'] is not None:
+        manifest['async_compression_measurement'] = summarize_async_compression(directory)
     atomic_json(directory / "serving.json", manifest)
     return manifest

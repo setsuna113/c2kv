@@ -57,6 +57,9 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
 def _assert_proxy_port_available(port: int) -> None:
     """Fail before spawn when this run cannot own the proxy listen port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # ThreadingHTTPServer permits rebinding after its prior connections
+        # enter TIME_WAIT; the preflight must use the same socket option.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as exc:

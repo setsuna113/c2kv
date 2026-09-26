@@ -147,6 +147,8 @@ def bind_benchmark(benchmark_dir):
 
 
 def worker(contract_path):
+    started_ns = time.perf_counter_ns()
+    started_unix_ns = time.time_ns()
     contract = json.loads(contract_path.read_text(encoding='utf-8'))
     ready = contract['server_manifest']
     root = Path(contract['bfcl_project_root'])
@@ -164,6 +166,7 @@ def worker(contract_path):
             raise ValueError('task selection changed after parent overlap admission')
         save(contract_path.parent / 'overlap_admission.json', worker_admission)
     from benchmarks.adapters.bfcl_adapter import run_bfcl
+    initialized_ns = time.perf_counter_ns()
     summary = run_bfcl(
         contract['base_url'], categories=task_category(ready['allowed_task_ids']), mode='both',
         run_ids=ready['allowed_task_ids'], model=ready['model_name'],
@@ -171,6 +174,12 @@ def worker(contract_path):
         gold_recovery=None, task_audit_path=root / 'task_audit' / 'tasks.jsonl',
         num_threads=1, no_upstream_retries=True, generation_temperature=0,
         generation_seed=0, generation_max_tokens=ready['max_new_tokens'])
+    summary['bfcl_worker_timing'] = {
+        'schema': 'bfcl-worker-timing-v1', 'start_unix_ns': started_unix_ns,
+        'initialization_duration_ns': initialized_ns - started_ns,
+        'harness_duration_ns': time.perf_counter_ns() - initialized_ns,
+        'scope': 'Worker entry through benchmark binding and adapter import; Python interpreter and module startup before worker entry are excluded.',
+    }
     save(Path(contract['summary_path']), summary)
 
 
