@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 import copy
+import os
 
 from . import C1_V2_VARIANTS, C1_V2_VERSION
 from .controller import CandidateRecoveryController
 from .repair_protocol import RepairContext
 from .verified_binding import PROOF_REGISTRY_VERSION
-from .verified_commit import VerifiedCommitPolicy
+from .verified_commit import CoreCommitPolicy, VerifiedCommitPolicy
 from ..policy import PolicyInputError
 from .capacity_source_gate import POLICY_VERSION, CapacityGatedSourceAllocator
+
+# Event-only ablation: "off" keeps detector, recovery and selected-generation validation but
+# never applies source-verified argument correction. Every decision's verified_binding and
+# commit_transform receipts then carry CoreCommitPolicy.STATUS.
+ARGUMENT_CORRECTION_ENV = "C2KV_RACER_ARGUMENT_CORRECTION"
+
+
+def argument_correction_enabled():
+    value = os.environ.get(ARGUMENT_CORRECTION_ENV, "on")
+    if value not in {"on", "off"}:
+        raise ValueError(f"{ARGUMENT_CORRECTION_ENV} must be 'on' or 'off'")
+    return value == "on"
 
 
 def c1_v2_fields(variant):
@@ -54,7 +67,8 @@ class C1V2VerifiedController(CandidateRecoveryController):
     def __init__(self, base, config, *, risk_model=None, binding_policy=None):
         self.c1_variant = config["variant"]
         self.c1_contract = validate_c1_v2_config(config)
-        self.commit_policy = VerifiedCommitPolicy(binding_policy)
+        self.commit_policy = (VerifiedCommitPolicy(binding_policy) if argument_correction_enabled()
+                              else CoreCommitPolicy())
         super().__init__(base, {**config, "variant": "goal_rescue"},
                          risk_model=risk_model, completion_review_enabled=False)
 
