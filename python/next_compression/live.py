@@ -701,6 +701,34 @@ def _prepare_adapted_a_view(
     }
 
 
+def _hybrid_tool_material(
+    decision: Decision,
+    tools: Sequence[Mapping[str, Any]],
+    top_k: int,
+) -> tuple[Any, dict[str, Any]]:
+    """Section 3.2 hybrid allocation: lexical top-k native, remainder as T0 blocks."""
+    from .exp1_tools import (
+        RANKER,
+        decision_messages,
+        layout_material,
+        lexical_rank,
+        query_text,
+    )
+
+    if type(top_k) is not int or top_k <= 0:
+        raise ValueError("tool_top_k must be a positive integer")
+    ranked = lexical_rank(tools, query_text(decision_messages(decision)))
+    native = tuple(sorted(ranked[:top_k]))
+    material = layout_material(tools, "hybrid", native_indices=native)
+    return material, {
+        "layout": "hybrid",
+        "k": top_k,
+        "ranker": RANKER,
+        "native_tool_indices": list(native),
+        "lexical_rank": list(ranked),
+    }
+
+
 def _prepare_memory(
     decision: Decision,
     tools: Sequence[Mapping[str, Any]],
@@ -712,11 +740,15 @@ def _prepare_memory(
     max_new_tokens: int,
     config: HistoryPreparationConfig | ToolPreparationConfig,
     source_profile: str,
+    tool_layout: str = "variant",
+    tool_top_k: int = 3,
 ) -> tuple[PackedMemory, dict[str, Any]]:
     metadata: dict[str, Any] = {}
     reason: str | None = None
     tool_documents = 0
     compressed_tool_definitions = 0
+    if tool_layout not in ("variant", "hybrid"):
+        raise ValueError("tool_layout must be 'variant' or 'hybrid'")
     if mode == "full":
         memory = _all_raw_memory(decision, tokenizer, config)
         reason = "mode_full"
@@ -751,8 +783,14 @@ def _prepare_memory(
             memory = _all_raw_memory(decision, tokenizer, config)
             reason = "no_native_tool_definitions"
         else:
+            layout_info: dict[str, Any] | None = None
             try:
-                material = tool_variant_material(tools, variant)
+                if tool_layout == "hybrid":
+                    if variant != "T0":
+                        raise ValueError("The hybrid tool layout requires a T0 checkpoint")
+                    material, layout_info = _hybrid_tool_material(decision, tools, tool_top_k)
+                else:
+                    material = tool_variant_material(tools, variant)
             except ToolPackingError as error:
                 if variant == "T1" and getattr(error, "reason", str(error)) == "no_compressible_tool_information":
                     memory = _all_raw_memory(decision, tokenizer, config)
@@ -770,7 +808,10 @@ def _prepare_memory(
                     tokenizer,
                     variant=variant,
                     config=config,
+                    material=material if layout_info is not None else None,
                 )
+                if layout_info is not None:
+                    metadata["tool_layout"] = layout_info
     base_context_only = mode == "full" or reason in {
         "no_native_tool_definitions",
         "no_descriptive_tool_fields",
@@ -926,11 +967,33 @@ class LiveNextCompressionService:
         max_requests: int,
         max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
         ledger_path: str | Path | None = None,
+        tool_layout: str = "variant",
+        tool_top_k: int = 3,
+        max_raw_tokens: int | None = None,
     ) -> None:
         if ratio not in (8, 12):
             raise ValueError("ratio must be 8 or 12")
         if mode not in ("compressed", "full"):
             raise ValueError("mode must be compressed or full")
+        if tool_layout not in ("variant", "hybrid"):
+            raise ValueError("tool_layout must be 'variant' or 'hybrid'")
+        if type(tool_top_k) is not int or tool_top_k <= 0:
+            raise ValueError("tool_top_k must be a positive integer")
+        if tool_layout == "hybrid" and checkpoint_profile.get("variant") != "T0":
+            raise ValueError("The hybrid tool layout requires a T0 checkpoint")
+        if max_raw_tokens is not None and (type(max_raw_tokens) is not int or max_raw_tokens <= 0):
+            raise ValueError("max_raw_tokens must be a positive integer or None")
+        if max_raw_tokens is not None:
+            import dataclasses
+
+            if not isinstance(training_binding.preparation_config, ToolPreparationConfig):
+                raise ValueError("max_raw_tokens applies to tool checkpoints only")
+            training_binding = dataclasses.replace(
+                training_binding,
+                preparation_config=dataclasses.replace(
+                    training_binding.preparation_config, max_raw_tokens=max_raw_tokens
+                ),
+            )
         if not isinstance(model, str) or not model:
             raise ValueError("model alias must be nonempty")
         for name, value in (
@@ -953,6 +1016,9 @@ class LiveNextCompressionService:
         self.ratio = ratio
         self.mode = mode
         self.model = model
+        self.tool_layout = tool_layout
+        self.tool_top_k = tool_top_k
+        self.max_raw_tokens_override = max_raw_tokens
         if any(not isinstance(alias, str) or not alias for alias in model_aliases):
             raise ValueError("model aliases must be nonempty strings")
         self.accepted_models = tuple(dict.fromkeys((model, *model_aliases)))
@@ -1006,6 +1072,9 @@ class LiveNextCompressionService:
             "initialization_id": self.profile["initialization_id"],
             "ratio": self.ratio,
             "mode": self.mode,
+            "tool_layout": self.tool_layout,
+            "tool_top_k": self.tool_top_k if self.tool_layout == "hybrid" else None,
+            "max_raw_tokens_override": self.max_raw_tokens_override,
             "device": self.profile["device"],
             "dtype": self.profile["dtype"],
         }
@@ -1087,6 +1156,8 @@ class LiveNextCompressionService:
                         max_new_tokens=max_new_tokens,
                         config=self.binding.preparation_config,
                         source_profile=source_profile,
+                        tool_layout=self.tool_layout,
+                        tool_top_k=self.tool_top_k,
                     )
                 except (PackingBudgetError, ToolPackingError, ValueError) as error:
                     reason = getattr(error, "reason", None) or str(error)

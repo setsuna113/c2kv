@@ -486,7 +486,10 @@ def evaluate_checkpoint(
                 decision_id=record.decision_id,
                 target_weights=None,
             )
-            with torch.inference_mode():
+            # Same compute dtype as generation and training: under a BF16 load
+            # the FP32 gist projections need autocast, otherwise F.linear
+            # rejects the BF16 hidden states (seen on the first real GPU run).
+            with torch.inference_mode(), generator._base_autocast():
                 value = generator.runtime((decision,))["loss"].detach().float().item()
             if not math.isfinite(value):
                 raise ValueError(f"Non-finite uniform CE for {record.decision_id}")

@@ -33,7 +33,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=("compressed", "full"), default="compressed")
     parser.add_argument("--model", default="c2kv-next")
     parser.add_argument("--model-alias", action="append", default=[])
+    parser.add_argument(
+        "--tool-layout",
+        choices=("variant", "hybrid"),
+        default="variant",
+        help="hybrid: lexical top-k schemas native, remainder as T0 blocks (T0 checkpoints only)",
+    )
+    parser.add_argument("--tool-top-k", type=int, default=3)
+    parser.add_argument(
+        "--max-raw-tokens",
+        type=int,
+        default=None,
+        help="Override the frozen native-prefix budget of a tool checkpoint (hybrid layouts need more)",
+    )
     args = parser.parse_args(argv)
+    if args.tool_top_k <= 0:
+        parser.error("--tool-top-k must be positive")
+    if args.max_raw_tokens is not None and args.max_raw_tokens <= 0:
+        parser.error("--max-raw-tokens must be positive")
     if len(args.checkpoint) != 1 or len(args.training_manifest) != 1:
         parser.error(
             "exactly one --checkpoint and one --training-manifest are required; "
@@ -66,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         max_requests=args.max_requests,
         max_request_bytes=args.max_request_bytes,
         ledger_path=output_dir / "requests.jsonl",
+        tool_layout=args.tool_layout,
+        tool_top_k=args.tool_top_k,
+        max_raw_tokens=args.max_raw_tokens,
     )
     health = service.health()
     (output_dir / "server.json").write_text(
