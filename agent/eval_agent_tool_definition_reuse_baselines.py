@@ -469,6 +469,7 @@ def _generate_one_reuse(
         keep_bos=False,
         role="user",
         compress_method=compress_method,
+        compress_ratio=float(args.override_ratio),
     )
     _sync_device(device)
     full_prefill_sec = time.perf_counter() - start
@@ -717,6 +718,7 @@ def _generate_one_reuse_hybrid(
             keep_bos=False,
             role="user",
             compress_method=compress_method,
+            compress_ratio=float(args.override_ratio),
         )
         _sync_device(device)
         rest_prefill_sec = time.perf_counter() - start
@@ -992,6 +994,7 @@ def _generate_one_reuse_aug_hybrid(
         keep_bos=False,
         role="user",
         compress_method=compress_method,
+        compress_ratio=float(args.override_ratio),
     )
     _sync_device(device)
     compressed_prefill_sec = time.perf_counter() - start
@@ -1641,6 +1644,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
     requested_modes = [item.strip() for item in (args.compare_modes or args.mode).split(",") if item.strip()]
     modes = [MODE_ALIASES.get(mode, mode) for mode in requested_modes]
     ratios = [int(item.strip()) for item in (args.ratios or str(args.override_ratio)).split(",") if item.strip()]
+    reuse_ratios = [int(item.strip()) for item in args.reuse_ratios.split(",") if item.strip()]
     rows: List[Dict[str, Any]] = []
 
     for mode in modes:
@@ -1649,7 +1653,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         if mode in {"full", "reuse", "epic_leading32", "cacheblend_vdiff"}:
             run_ratios = [1]
         elif mode in {"snapkv_reuse", "epic_leading32_snapkv", "cacheblend_vdiff_snapkv"} | REUSE_HYBRID_MODES | REUSE_AUG_HYBRID_MODES:
-            run_ratios = [4]
+            run_ratios = reuse_ratios
         else:
             run_ratios = ratios
 
@@ -1755,7 +1759,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "notes": {
             "epic_leading32": "PyTorch selective recompute with recompute_type=leading-32.",
             "cacheblend_vdiff": f"PyTorch value-difference selective recompute with recompute_type=vdiff-{args.cacheblend_recompute_ratio}; not the vLLM+LMCache expr_cacheblend.py path.",
-            "snapkv_reuse": "Uses reuse_pipeline SnapKV compression, currently hard-coded to roughly 4x in compress_kv.",
+            "snapkv_reuse": f"Uses reuse_pipeline SnapKV compression at ratio(s) {args.reuse_ratios}.",
             "epic_leading32_snapkv": "EPIC leading-32 selective recompute on top of SnapKV-compressed document KV.",
             "cacheblend_vdiff_snapkv": f"Value-difference selective recompute on top of SnapKV-compressed document KV with recompute_type=vdiff-{args.cacheblend_recompute_ratio}.",
             "snapkv_hybrid": f"Hybrid top-{args.hybrid_top_k} full tool schemas plus SnapKV-compressed rest tool schemas.",
@@ -1823,6 +1827,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ratios", default="4", help="Ratios for truncate/c2kv/snapkv_reuse/hybrid.")
     parser.add_argument("--override_ratio", type=int, default=4)
+    parser.add_argument(
+        "--reuse_ratios",
+        default="4",
+        help="Ratios for SnapKV-compressed reuse modes (snapkv_*, epic_leading32_snapkv*, cacheblend_vdiff_snapkv*).",
+    )
     parser.add_argument("--hybrid_top_k", type=int, default=3)
     parser.add_argument("--router_scope", choices=["last_user", "all"], default="last_user")
     parser.add_argument("--router_strategy", choices=["lexical", "random"], default="lexical")

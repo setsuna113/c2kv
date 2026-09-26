@@ -14,6 +14,7 @@ SPLIT="${SPLIT:-eval}"
 
 COMPARE_MODES="${COMPARE_MODES:-full,snapkv_reuse,epic_leading32_snapkv,cacheblend_vdiff_snapkv,c2kv,hybrid,snapkv_hybrid,epic_leading32_snapkv_hybrid,cacheblend_vdiff_snapkv_hybrid}"
 RATIOS="${RATIOS:-4}"
+REUSE_RATIOS="${REUSE_RATIOS:-4}"
 MAX_EXAMPLES="${MAX_EXAMPLES:-0}"
 HYBRID_TOP_K="${HYBRID_TOP_K:-3}"
 CACHEBLEND_RECOMPUTE_RATIO="${CACHEBLEND_RECOMPUTE_RATIO:-0.15}"
@@ -54,6 +55,7 @@ echo "OUTPUT_FILE=${OUTPUT_FILE}"
 echo "SPLIT=${SPLIT}"
 echo "COMPARE_MODES=${COMPARE_MODES}"
 echo "RATIOS=${RATIOS}"
+echo "REUSE_RATIOS=${REUSE_RATIOS}"
 echo "MAX_EXAMPLES=${MAX_EXAMPLES}"
 echo "SELECTION_FILTER=${SELECTION_FILTER}"
 echo "TOOL_DOCUMENT_EVAL_MODE=${TOOL_DOCUMENT_EVAL_MODE}"
@@ -100,6 +102,7 @@ if [[ "${PARALLEL_EVAL}" != "True" && "${PARALLEL_EVAL}" != "true" && "${PARALLE
     "${SPLIT_ARGS[@]}" \
     --compare_modes "${COMPARE_MODES}" \
     --ratios "${RATIOS}" \
+    --reuse_ratios "${REUSE_RATIOS}" \
     --hybrid_top_k "${HYBRID_TOP_K}" \
     --cacheblend_recompute_ratio "${CACHEBLEND_RECOMPUTE_RATIO}" \
     --max_examples "${MAX_EXAMPLES}" \
@@ -126,6 +129,7 @@ mkdir -p "${TMP_DIR}"
 IFS=',' read -ra _visible_npus <<< "${ASCEND_RT_VISIBLE_DEVICES}"
 IFS=',' read -ra _modes <<< "${COMPARE_MODES}"
 IFS=',' read -ra _ratios <<< "${RATIOS}"
+IFS=',' read -ra _reuse_ratios <<< "${REUSE_RATIOS}"
 
 CASE_OUTPUTS=()
 SUMMARY_FILES=()
@@ -138,7 +142,7 @@ for mode in "${_modes[@]}"; do
   if [[ "${mode}" == "full" || "${mode}" == "reuse" || "${mode}" == "epic_leading32" || "${mode}" == "cacheblend_vdiff" ]]; then
     case_ratios=("1")
   elif [[ "${mode}" == "snapkv_reuse" || "${mode}" == "epic_leading32_snapkv" || "${mode}" == "cacheblend_vdiff_snapkv" || "${mode}" == "snapkv_hybrid" || "${mode}" == "epic_leading32_snapkv_hybrid" || "${mode}" == "cacheblend_vdiff_snapkv_hybrid" || "${mode}" == "c2kv_aug_hybrid" || "${mode}" == "snapkv_aug_hybrid" || "${mode}" == "epic_leading32_snapkv_aug_hybrid" || "${mode}" == "cacheblend_vdiff_snapkv_aug_hybrid" ]]; then
-    case_ratios=("4")
+    case_ratios=("${_reuse_ratios[@]}")
   fi
   for ratio in "${case_ratios[@]}"; do
     ratio="${ratio// /}"
@@ -165,6 +169,7 @@ for mode in "${_modes[@]}"; do
         "${SPLIT_ARGS[@]}" \
         --compare_modes "${mode}" \
         --ratios "${ratio}" \
+        --reuse_ratios "${ratio}" \
         --hybrid_top_k "${HYBRID_TOP_K}" \
         --cacheblend_recompute_ratio "${CACHEBLEND_RECOMPUTE_RATIO}" \
         --max_examples "${MAX_EXAMPLES}" \
@@ -209,7 +214,7 @@ python agent/merge_agent_tool_definition_reuse_baselines_eval.py \
   --split "${SPLIT}" \
   --tool_document_eval_mode "${TOOL_DOCUMENT_EVAL_MODE}" \
   --modes "${COMPARE_MODES}" \
-  --ratios "${RATIOS}" \
+  --ratios "${RATIOS},${REUSE_RATIOS}" \
   --cacheblend_recompute_ratio "${CACHEBLEND_RECOMPUTE_RATIO}" \
   "${MERGE_ARGS[@]}" \
   --input_files "${CASE_OUTPUTS[@]}"

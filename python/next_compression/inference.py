@@ -115,14 +115,21 @@ def _resolve_device(value: str):
 
     if not isinstance(value, str) or not value:
         raise ValueError("device must be explicit and nonempty")
+    if value.startswith("npu"):
+        import torch_npu  # noqa: F401  (registers the npu device type)
     device = torch.device(value)
     if device.type == "cuda":
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is unavailable")
         if device.index is not None and not 0 <= device.index < torch.cuda.device_count():
             raise ValueError(f"CUDA device index is unavailable: {device.index}")
+    elif device.type == "npu":
+        if not torch.npu.is_available():
+            raise RuntimeError("NPU is unavailable")
+        if device.index is not None and not 0 <= device.index < torch.npu.device_count():
+            raise ValueError(f"NPU device index is unavailable: {device.index}")
     elif device.type != "cpu":
-        raise ValueError("device must select cpu or cuda")
+        raise ValueError("device must select cpu, cuda, or npu")
     return device
 
 
@@ -486,7 +493,10 @@ def evaluate_checkpoint(
                 decision_id=record.decision_id,
                 target_weights=None,
             )
-            with torch.inference_mode():
+            # Same compute dtype as generation and training: under a BF16 load
+            # the FP32 gist projections need autocast, otherwise F.linear
+            # rejects the BF16 hidden states (seen on the first real GPU run).
+            with torch.inference_mode(), generator._base_autocast():
                 value = generator.runtime((decision,))["loss"].detach().float().item()
             if not math.isfinite(value):
                 raise ValueError(f"Non-finite uniform CE for {record.decision_id}")

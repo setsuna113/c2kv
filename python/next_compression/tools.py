@@ -457,14 +457,24 @@ def pack_tool_memory(
     *,
     variant: str,
     config: ToolPreparationConfig | None = None,
+    material: ToolVariantMaterial | None = None,
 ) -> PackedMemory:
-    """Pack the target-independent T0/T1 prefix for training or inference."""
+    """Pack the target-independent T0/T1 prefix for training or inference.
+
+    ``material`` overrides the variant's native/document split with an
+    inference-time allocation (Exp 1 layouts in :mod:`exp1_tools`). Training
+    never passes it. An override without documents packs a purely native
+    prefix; the variant then only names the document format and chunk ids.
+    """
     config = config or ToolPreparationConfig()
     if not isinstance(store, EventStore):
         raise TypeError("store must be an EventStore")
     if config.max_tools is not None and len(tools) > config.max_tools:
         raise ToolPackingError("tool_count_over_limit")
-    material = tool_variant_material(tools, variant)
+    if material is None:
+        material = tool_variant_material(tools, variant)
+    elif not isinstance(material, ToolVariantMaterial):
+        raise TypeError("material must be ToolVariantMaterial")
     all_raw = MemoryView(
         gist_event_ids=(),
         raw_event_ids=tuple(event.event_id for event in store.events),
@@ -480,12 +490,15 @@ def pack_tool_memory(
         )
     except PackingBudgetError as exc:
         raise ToolPackingError("raw_tokens_over_limit") from exc
-    chunks = _document_chunks(
-        tokenizer,
-        material.documents,
-        variant=variant,
-        config=config,
-    )
+    if material.documents:
+        chunks = _document_chunks(
+            tokenizer,
+            material.documents,
+            variant=variant,
+            config=config,
+        )
+    else:
+        chunks = ()
     return PackedMemory(
         view=native.view,
         system_input_ids=native.system_input_ids,

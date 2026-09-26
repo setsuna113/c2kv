@@ -216,6 +216,7 @@ class LLMInference:
         role: str | None = None,
         compress_method: str | None = None,
         repeat_token_num: int | None = None,
+        compress_ratio: float = 4.0,
     ) -> BatchedKVInstance:
         """
         获取一批文本prefill后的键值缓存
@@ -255,7 +256,7 @@ class LLMInference:
             for seq_i, seq_l in enumerate(seq_len):
                 key, value = key_states[seq_i, :, :seq_l], value_states[seq_i, :, :seq_l]
                 if enable_compress:
-                    compressed_len = math.ceil(seq_l / 4.0) # compress rate 4:1
+                    compressed_len = math.ceil(seq_l / compress_ratio)
                     key, value, indices = compress_kv(
                         compress_method, compressed_len,
                         queries[layer_i][seq_i, :seq_l], key, value,
