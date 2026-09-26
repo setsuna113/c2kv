@@ -1,4 +1,4 @@
-"""One unsubmitted event-native decision with at most one regeneration."""
+"""One unsubmitted event-native decision with configured bounded recovery."""
 from __future__ import annotations
 
 import copy
@@ -90,11 +90,37 @@ class EventNativeDecisionRunner:
                 finally:
                     record['controller_timing']['reconsider_seconds'] = time.perf_counter() - reconsider_started
                 record['exact_recovery'] = copy.deepcopy(reconsidered['decision'])
-                if reconsidered['regenerate']:
-                    record['generation_trace'][0]['discarded'] = True
+                rounds = []
+                max_rounds = getattr(self.controller, 'max_recovery_rounds', 1)
+                checks = [copy.deepcopy(reconsidered['decision'])]
+                if hasattr(self.controller, 'max_recovery_rounds'):
+                    record['recovery_checks'] = checks
+                    record['recovery_rounds'] = rounds
+                while reconsidered['regenerate']:
+                    rounds.append(copy.deepcopy(reconsidered['decision']))
+                    record['generation_trace'][-1]['discarded'] = True
                     result, draft = self._generate(
                         reconsidered['memory'], reconsidered['metadata'], record, 'regeneration')
-                # There is deliberately no second reconsideration of the final draft.
+                    if len(rounds) >= max_rounds or self.generation_calls >= self.max_generation_calls:
+                        break
+                    advance = getattr(self.controller, 'advance_recovery', None)
+                    if not callable(advance):
+                        break
+                    advance(prepared, shadow_features=(getattr(result, 'stats', {}) or {}).get('shadow_features'))
+                    reconsider_started = time.perf_counter()
+                    try:
+                        reconsidered = self.controller.reconsider(
+                            prepared, list(draft.tool_calls), draft_text=draft.text,
+                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                        checks.append(copy.deepcopy(reconsidered['decision']))
+                    finally:
+                        record['controller_timing']['reconsider_seconds'] += time.perf_counter() - reconsider_started
+                if hasattr(self.controller, 'max_recovery_rounds'):
+                    record['exact_recovery'] = copy.deepcopy(rounds[-1] if rounds else reconsidered['decision'])
+                    record['exact_recovery']['recovery_round_count'] = len(rounds)
+                    record['exact_recovery']['termination'] = (
+                        reconsidered['decision']['reason'] if not reconsidered['regenerate']
+                        else 'recovery_or_generation_limit')
                 record['response'] = {
                     'role': 'assistant', 'content': draft.content,
                     'tool_calls': list(draft.tool_calls),
@@ -180,8 +206,12 @@ class EventNativeDecisionRunner:
         self.journal.finish(handle, 'completed', usage=usage)
         draft = decode_native_generation(
             self.tokenizer, result,
-            call_id_prefix=f"d{metadata['decision_index']}_{'r0' if phase == 'draft' else 'r1'}")
+            call_id_prefix=f"d{metadata['decision_index']}_r{len(record['generation_trace']) - 1}")
         trace['native_draft'] = {'version': NATIVE_DRAFT_VERSION, **asdict(draft)}
+        selection_observer = getattr(self.controller, 'observe_selection_draft', None)
+        if callable(selection_observer):
+            selection_observer(session_id=record['session_id'], decision_key=record['decision_key'],
+                               token_logprobs=list(result.token_logprobs))
         return result, draft
 
     @staticmethod

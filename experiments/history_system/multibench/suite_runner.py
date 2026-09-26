@@ -15,6 +15,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
+from urllib.parse import urlsplit
 
 
 SUITE_SCHEMA = "a-history-multibench-frozen-suite-v1"
@@ -318,7 +319,9 @@ def validate_suite(
         "history_view_protocol": "fixed-budget-main",
         "ratio": 8,
         "dtype": "bfloat16",
-        "device": "npu:0",
+        "device": "cpu",
+        "generation_backend": "sglang",
+        "session_cache_policy": "external-sglang-content-addressed-chunks-v1",
         "prefill_chunk_size": 256,
         "decode_strategy": "incremental",
         "no_raw_snapshot": True,
@@ -326,6 +329,25 @@ def validate_suite(
     for name, expected in exact_runtime.items():
         if runtime.get(name) != expected:
             raise ValueError(f"Frozen suite changed runtime.{name}")
+    backend_url = runtime.get("sglang_backend_url")
+    parsed_backend_url = urlsplit(backend_url) if isinstance(backend_url, str) else None
+    if (
+        parsed_backend_url is None
+        or parsed_backend_url.scheme != "http"
+        or not parsed_backend_url.netloc
+        or parsed_backend_url.username is not None
+        or parsed_backend_url.password is not None
+        or parsed_backend_url.path not in {"", "/"}
+        or parsed_backend_url.query
+        or parsed_backend_url.fragment
+    ):
+        raise ValueError("Frozen suite requires a bare SGLang backend URL")
+    backend_timeout = runtime.get("sglang_timeout_seconds")
+    if (type(backend_timeout) not in (int, float)
+            or not math.isfinite(backend_timeout) or backend_timeout <= 0):
+        raise ValueError("Frozen suite requires a finite SGLang backend timeout")
+    if runtime.get("npu_allocator_metrics") is not False:
+        raise ValueError("External SGLang generation cannot use process-local allocator metrics")
     if runtime.get("sampling") != {"mode": "greedy", "temperature": 0, "seed": 0}:
         raise ValueError("Frozen suite must use greedy seed0 generation")
     if suite.get("max_new_tokens_by_benchmark") != TASK_MAX_NEW_TOKENS:
@@ -487,6 +509,12 @@ def server_command(
         ),
         "--max-wall-seconds",
         str(limits["server_wall_seconds_per_task"]),
+        "--generation-backend",
+        runtime["generation_backend"],
+        "--sglang-backend-url",
+        runtime["sglang_backend_url"],
+        "--sglang-timeout-seconds",
+        str(runtime["sglang_timeout_seconds"]),
         "--device",
         runtime["device"],
         "--dtype",
@@ -498,7 +526,7 @@ def server_command(
         "--torch-threads",
         str(runtime.get("torch_threads", 4)),
     ]
-    if runtime.get("npu_allocator_metrics", True):
+    if runtime.get("npu_allocator_metrics", False):
         command.append("--npu-allocator-metrics")
     extraction = runtime.get("extraction_policy", "all-eligible")
     if extraction not in ("all-eligible", "retained-gist"):

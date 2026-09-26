@@ -1,0 +1,68 @@
+{
+  "schema": "c2kv-method-integration-v1",
+  "status": "implementation_smoke_validated",
+  "cuda": {
+    "experiment": "experiment1_history",
+    "model_family": "qwen3-4b",
+    "arms": [
+      "full",
+      "agentfold",
+      "commitkv",
+      "agentkv",
+      "history_kv_pyramidkv"
+    ],
+    "benchmarks": {
+      "acebench_agent": {
+        "runner_benchmark": "acebench",
+        "category": "agent",
+        "category_expansion": ["agent_multi_turn", "agent_multi_step"],
+        "language": "en",
+        "history_role": "evaluated_agent",
+        "required_features": ["acebench_role_history_v1"]
+      },
+      "toolsandbox": {
+        "runner_benchmark": "toolsandbox",
+        "role_split": {
+          "agent": "arm_proxy",
+          "user_simulator": "raw_upstream"
+        },
+        "scorer": "official_state_similarity",
+        "required_patch_markers": [
+          "OPENAI_BASE_URL",
+          "TOOLSANDBOX_USER_BASE_URL",
+          "empty_tool_calls_guard"
+        ]
+      }
+    },
+    "protocol": {
+      "history_state": "append_only_event_state_v1",
+      "compression_boundary": "one_action_tool_feedback_turn",
+      "raw_archive": "external_only_until_explicit_recovery",
+      "retrospective_recovery_limit": 1,
+      "method_implementation": "text_surrogate"
+    }
+  },
+  "npu": {
+    "experiment": "experiment2_compression_generality",
+    "device": "ascend910b3",
+    "backends": ["c2kv", "h2o", "snapkv", "pyramidkv"],
+    "conditions": [
+      "compression_full_budget",
+      "tracer_history",
+      "recovery_off_same_initial"
+    ],
+    "benchmarks": ["bfcl_base", "bfcl_long_context", "appworld"],
+    "history_kv_contract": {
+      "state": "persistent_session",
+      "unit": "tokens_1024",
+      "method": "server_side_per_layer_history_kv_eviction",
+      "pyramidkv": "per_layer_funnel_budget"
+    }
+  },
+  "validation": {
+    "cuda_unit": "experiments/history_system/runtime/benchmarks/test_history_methods.py",
+    "cuda_proxy_e2e": "experiments/history_system/runtime/benchmarks/test_history_method_proxy.py",
+    "npu_matrix": "c2kv-generality-npu/tests/test_pyramidkv_integration.py",
+    "npu_execution": "pending_remote_ascend03_run"
+  }
+}

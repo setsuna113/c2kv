@@ -148,7 +148,8 @@ def metadata_after_admission(
         selected_source_indices=list(measure.memory.raw_source_indices),
         raw_evidence_event_ids=list(
             dict.fromkeys(
-                [*(metadata.get("raw_evidence_event_ids") or ()), candidate]
+                [*(metadata.get("raw_evidence_event_ids") or ()),
+                 *([candidate] if candidate is not None else [])]
             )
         ),
         source_coverage=coverage,

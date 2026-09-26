@@ -1,0 +1,15 @@
+{
+  "schema": "a-history-gp-v1",
+  "G": "current",
+  "U": "event",
+  "B": "source",
+  "Q": "lexical",
+  "K": 1,
+  "L": "next_decision",
+  "R": 1,
+  "D": "detector",
+  "P": "quoted",
+  "order": "chronological",
+  "candidate_limit": 8,
+  "selection_threshold": 0.0
+}

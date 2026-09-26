@@ -1,0 +1,48 @@
+{
+  "run_root": "/home/liuyancheng/gp_search_v1",
+  "engine_port": 36110,
+  "port_base": 36700,
+  "checkpoint": "/home/liuyancheng/c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000",
+  "benchmark_dir": "/home/liuyancheng/benchmarks/gorilla/berkeley-function-call-leaderboard",
+  "python": "/home/liuyancheng/envs/sgl/bin/python",
+  "bfcl_python": "/home/liuyancheng/envs/bench/bin/python",
+  "candidates": [
+    {
+      "candidate_id": "gp_52ede92dd4c8",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_52ede92dd4c8"
+    },
+    {
+      "candidate_id": "gp_8c305db7d288",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_8c305db7d288"
+    },
+    {
+      "candidate_id": "gp_362a29c103b4",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_362a29c103b4"
+    },
+    {
+      "candidate_id": "gp_6a2d0091714d",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_6a2d0091714d"
+    },
+    {
+      "candidate_id": "gp_2e4798e4509b",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_2e4798e4509b"
+    },
+    {
+      "candidate_id": "gp_4de6dfbc003d",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_4de6dfbc003d"
+    },
+    {
+      "candidate_id": "gp_166dd3feb459",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_166dd3feb459"
+    },
+    {
+      "candidate_id": "gp_5f01ab52f9a2",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_5f01ab52f9a2"
+    },
+    {
+      "candidate_id": "gp_fd2f1e8c9455",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_fd2f1e8c9455"
+    }
+  ],
+  "retry_failed": true
+}

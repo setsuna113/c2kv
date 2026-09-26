@@ -16,6 +16,7 @@ import sys
 from typing import Any, Iterable, Mapping, MutableMapping, Optional
 
 from arms import ARMS
+import history_methods
 
 
 SCHEMA_VERSION = 1
@@ -299,7 +300,8 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
 
 def _method_capabilities(result: PreflightResult, arm: str, backend: str,
                          benchmark: str, profile: Optional[Mapping[str, Any]],
-                         features: frozenset[str]) -> None:
+                         features: frozenset[str],
+                         options: Mapping[str, Any]) -> None:
     if arm not in ARMS:
         result.requirements.append(Requirement(
             code="known_arm", severity="error", satisfied=False,
@@ -320,7 +322,8 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
             code="valid_arm", severity="error", satisfied=False, message=str(error)))
         return
 
-    history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy)
+    history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy
+                       or spec.history_method)
     # This is deliberately a warning: an out-of-training compression ratio is
     # an explicit ablation, not an invalid request.  It remains visible in the
     # cell preflight so a matrix result cannot later be described as using the
@@ -346,6 +349,22 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
             message=("ACEBench legacy requests carry one growing user transcript; "
                      "non-full arms require feature acebench_role_history_v1"),
         ))
+
+    if spec.history_method:
+        declared_family = _nonempty(options if isinstance(options, Mapping) else {},
+                                    "model_family")
+        if not declared_family:
+            declared_family = _profile_value(profile, "model_family")
+        normalized_family = history_methods.normalize_model_family(declared_family)
+        result.requirements.append(Requirement(
+            code="history_method_model_family", severity="error",
+            satisfied=normalized_family == history_methods.MODEL_FAMILY,
+            message=("AgentFold, CommitKV and AgentKV compatibility arms require "
+                     "the Qwen3-4B serving model family"),
+        ))
+        result.effective["history_method"] = str(spec.history_method)
+        result.effective["history_method_protocol"] = "append_only_event_state_v1"
+        result.effective["history_method_model_family"] = normalized_family
 
     if spec.kv_reuse:
         result.requirements.append(Requirement(
@@ -488,7 +507,8 @@ def preflight(benchmark: str, arm: str, backend: str = "sglang", *,
         result.effective["bfcl_oracle_max_events"] = str(oracle_max_events)
 
     feature_set = frozenset(all_features)
-    _method_capabilities(result, arm, backend, benchmark, profile, feature_set)
+    _method_capabilities(result, arm, backend, benchmark, profile, feature_set,
+                         opts)
     _benchmark_prerequisites(result, benchmark, opts, env, feature_set, arm=arm)
     return result
 

@@ -1,0 +1,32 @@
+{
+  "schema": "recoverability-design-v1",
+  "parent_protocol": "evidence_sets_v1/T02",
+  "purpose": "Decide whether to prioritize source recall/selection, packaging/allocation, or evidence use and execution.",
+  "diagnostic_only": true,
+  "training_eligible": false,
+  "max_states": 12,
+  "max_states_per_task_group": 1,
+  "max_extra_branch_executions": 24,
+  "sample": "T02 train/calibration states with official A0 current-turn failure, all earlier turns valid, and no current-turn action executed",
+  "exclude_manifests": ["D128", "F128"],
+  "reuse": ["A0", "A1", "A2"],
+  "extra_branches": ["known_support", "full_history"],
+  "known_support": {
+    "source": "reviewed verbatim spans already in the complete observed archive",
+    "retrieval": "bypass retrieval and selector only",
+    "packing": "frozen static units, presentation, whole-set B0, existing raw/gist unchanged",
+    "fallback": "only if enabled in the parent configuration",
+    "initial_regeneration_count": 1,
+    "continuation_memory_policy": "frozen_T02_policy"
+  },
+  "full_history": {
+    "source": "complete observed history, no future observations or reference actions",
+    "continuation_memory_policy": "full_observed_history_every_decision",
+    "actor_sampling_tools_and_remaining_limits": "same as parent",
+    "same_budget_comparison": false,
+    "cost": "record separately"
+  },
+  "execution_owner": "T02 collection task retains live snapshots and controls device use",
+  "auto_retry": false,
+  "claim_scope": "diagnostic clues; neither deployable benchmark scores nor a strict ability upper bound"
+}

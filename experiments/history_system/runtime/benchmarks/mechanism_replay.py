@@ -37,7 +37,7 @@ if str(BENCHMARKS_DIR) not in sys.path:
 import proxy as proxy_mod  # noqa: E402
 from arms import ARMS, Arm, get_arm, history_kv_spec  # noqa: E402
 from backends.base import BackendError  # noqa: E402
-from backends.sglang import SglangBackend  # noqa: E402
+from backends.sglang import SglangBackend, detect_sglang_commit  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 
 
@@ -1853,6 +1853,7 @@ def execute(args: argparse.Namespace) -> int:
         "plan_sha256": _json_sha256(plan),
         "cases_path": str(args.cases.resolve()),
         "input_mode": input_mode,
+        "sglang_commit": detect_sglang_commit(),
         "case_corpus_count": corpus_count,
         "selected_case_ids": [case["case_id"] for case in selected],
         "selection": "first max_cases sorted by numeric official task ID",

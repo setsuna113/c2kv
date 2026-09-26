@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from history_memory.encoding_scope import plan_encoding_scope, validate_encoding_scope
 from history_memory.events import EventStore
 from history_memory.packing import (
     EncoderChunk,
+    EncodingScopeCapacityError,
     MemoryView,
     PackedMemory,
     PackingBudgetError,
-    encode_event_chunks,
+    encode_scope_chunks,
     native_ids,
     pack_memory,
     visible_message,
@@ -87,6 +90,7 @@ class _SessionState:
     decision_index: int
     decisions: dict[str, tuple[tuple[Any, ...], PreparedEventNativeS0]]
     active_decision_key: str
+    encoding_scope: str
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ class EventNativeS0Controller:
         policy: Mapping[str, Any],
         model_context: int | None = None,
         s0_config: Mapping[str, Any] | None = None,
+        benchmark: str = "bfcl",
     ) -> None:
         if not callable(getattr(tokenizer, "apply_chat_template", None)):
             raise TypeError("tokenizer must expose apply_chat_template")
@@ -139,6 +144,11 @@ class EventNativeS0Controller:
         self.policy = _json_snapshot(policy)
         self.model_context = model_context
         self.s0_config = self._parse_s0_config(s0_config)
+        if not isinstance(benchmark, str) or not benchmark:
+            raise ValueError("benchmark must be a nonempty string")
+        self.benchmark = benchmark
+        self.encoding_scope = "current"
+        self.protected_recovery_messages: Sequence[Mapping[str, Any]] = ()
         self._owner = object()
         self._sessions: dict[str, _SessionState] = {}
 
@@ -152,12 +162,25 @@ class EventNativeS0Controller:
         session_id, decision_key, store, tools, tools_json, message_json = (
             self._validate_request(payload, ratio, max_new_tokens)
         )
-        signature = (message_json, tools_json, ratio, max_new_tokens)
+        encoding_scope = validate_encoding_scope(self.encoding_scope)
+        protected_signature = _canonical_json(
+            tuple(self.protected_recovery_messages)
+        )
+        signature = (
+            message_json,
+            tools_json,
+            ratio,
+            max_new_tokens,
+            encoding_scope,
+            protected_signature,
+        )
         state = self._sessions.get(session_id)
         if state is not None:
             if state.tools_json != tools_json:
+                _validate_append_only_tools(state.tools_json, tools)
+            if state.encoding_scope != encoding_scope:
                 raise PolicyInputError(
-                    "Tools changed within a session; use a new explicit session_id"
+                    "encoding_scope changed within a session; use a new explicit session_id"
                 )
             EventNativeController._validate_monotone_prefix(
                 state.message_json, message_json
@@ -188,6 +211,7 @@ class EventNativeS0Controller:
             decision_index=decision_index,
             decisions=decisions,
             active_decision_key=decision_key,
+            encoding_scope=encoding_scope,
         )
         return prepared
 
@@ -284,14 +308,29 @@ class EventNativeS0Controller:
         users = [event for event in store.events if event.kind == "user"]
         if users:
             mandatory_ids.add(users[-1].event_id)
+        task_packet_event = min(
+            users, key=lambda event: min(event.source_indices)
+        ) if users else None
+        if self.benchmark == "acon_appworld" and task_packet_event is not None:
+            mandatory_ids.add(task_packet_event.event_id)
 
-        eligible_event_ids = tuple(
+        candidate_event_ids = tuple(
             event.event_id
             for event in store.events
             if event.complete
             and event.kind != "instruction"
+            and event.event_id != (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            )
             and any(index < cutoff for index in event.source_indices)
         )
+        scope_plan = plan_encoding_scope(
+            store, candidate_event_ids, validate_encoding_scope(self.encoding_scope)
+        )
+        eligible_event_ids = scope_plan.compressible_event_ids
+        mandatory_ids.update(scope_plan.pending_event_ids)
         eligible_source_indices = frozenset(
             index
             for event_id in eligible_event_ids
@@ -299,16 +338,15 @@ class EventNativeS0Controller:
             if index < cutoff
         )
         eligible_set = set(eligible_event_ids)
-        eligible_chunks = tuple(
-            chunk
-            for event_id in eligible_event_ids
-            for chunk in encode_event_chunks(
-                store,
-                event_id,
-                self.tokenizer,
-                max_chunk_tokens=self.packing.max_chunk_tokens,
-                chunk_overlap=self.packing.chunk_overlap,
-            )
+        eligible_chunks = encode_scope_chunks(
+            store,
+            eligible_event_ids,
+            self.tokenizer,
+            encoding_scope=scope_plan.scope,
+            max_chunk_tokens=self.packing.max_chunk_tokens,
+            chunk_overlap=self.packing.chunk_overlap,
+            atomic_unit_token_limit=self._atomic_unit_token_limit(),
+            event_groups=scope_plan.event_groups,
         )
 
         complete_tools = [
@@ -380,23 +418,20 @@ class EventNativeS0Controller:
                 common_tokens,
                 max_new_tokens,
             )
-            representation_candidates = [
-                candidate
-                for event_id in self._gist_priority(store, eligible_event_ids)
-                if (
-                    candidate := self._try_measure(
-                        store,
-                        tools,
-                        raw_ids,
-                        mandatory_ids,
-                        (event_id,),
-                        eligible_event_ids,
-                        common_tokens,
-                        max_new_tokens,
-                    )
+            representation_candidates = []
+            for event_group in self._gist_group_priority(store, eligible_event_ids):
+                candidate = self._try_measure(
+                    store,
+                    tools,
+                    raw_ids,
+                    mandatory_ids,
+                    event_group,
+                    eligible_event_ids,
+                    common_tokens,
+                    max_new_tokens,
                 )
-                is not None
-            ]
+                if candidate is not None:
+                    representation_candidates.append(candidate)
             latest_receipt.update(
                 status="skipped",
                 candidate_required_native_bytes=(
@@ -494,18 +529,19 @@ class EventNativeS0Controller:
             view, measure = candidate.memory.view, candidate
             admitted.append(event_id)
 
-        gist_priority = self._gist_priority(store, eligible_event_ids)
+        gist_groups = self._gist_group_priority(store, eligible_event_ids)
+        gist_priority = [event_id for group in gist_groups for event_id in group]
         retained_gist = list(view.gist_event_ids)
         skipped_gist: list[dict[str, Any]] = []
-        for event_id in gist_priority:
-            if event_id in retained_gist:
+        for event_group in gist_groups:
+            if set(event_group) <= set(retained_gist):
                 continue
             candidate = self._try_measure(
                 store,
                 tools,
                 view.raw_event_ids,
                 mandatory_ids,
-                (*retained_gist, event_id),
+                (*retained_gist, *event_group),
                 eligible_event_ids,
                 common_tokens,
                 max_new_tokens,
@@ -513,7 +549,8 @@ class EventNativeS0Controller:
             if candidate is None or candidate.reasons:
                 skipped_gist.append(
                     {
-                        "event_id": event_id,
+                        "event_id": event_group[0],
+                        "event_ids": list(event_group),
                         "reasons": (
                             ["packing_budget_exceeded"]
                             if candidate is None
@@ -523,7 +560,9 @@ class EventNativeS0Controller:
                 )
                 continue
             view, measure = candidate.memory.view, candidate
-            retained_gist.append(event_id)
+            retained_gist.extend(
+                event_id for event_id in event_group if event_id not in retained_gist
+            )
 
         reserve_candidates = [
             event
@@ -886,11 +925,28 @@ class EventNativeS0Controller:
             for event_id in eligible_event_ids
             if event_id not in set(view.raw_event_ids) | set(view.gist_event_ids)
         ]
+        effective_derived_messages = self._merge_protected_derived(derived_messages)
+        eligible_unit_ids = list(dict.fromkeys(
+            chunk.event_id for chunk in eligible_chunks
+        ))
+        retained_unit_ids = list(dict.fromkeys(
+            chunk.event_id for chunk in measure.memory.chunks
+        ))
         metadata = {
             "event_native_s0_version": EVENT_NATIVE_S0_VERSION,
             "event_native_policy_version": EVENT_NATIVE_POLICY_VERSION,
             "policy_source_commit": POLICY_SOURCE_COMMIT,
             "session_id": store.session_id,
+            "benchmark": self.benchmark,
+            "task_packet_protection": (
+                "first_non_system_user_raw"
+                if self.benchmark == "acon_appworld" else "none"
+            ),
+            "task_packet_event_id": (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            ),
             "decision_key": decision_key,
             "decision_index": decision_index,
             "view_mode": NATIVE_S0_MODE,
@@ -923,7 +979,9 @@ class EventNativeS0Controller:
             "common_input_source_indices": sorted(common_source_indices),
             "common_raw_prompt_tokens": common_tokens,
             "raw_source_indices": list(measure.memory.raw_source_indices),
-            "derived_workspace_prefix_messages": copy.deepcopy(list(derived_messages)),
+            "derived_workspace_prefix_messages": copy.deepcopy(
+                list(effective_derived_messages)
+            ),
             "derived_workspace_source_indices": [],
             "raw_event_ids": list(view.raw_event_ids),
             "gist_event_ids": list(view.gist_event_ids),
@@ -983,6 +1041,10 @@ class EventNativeS0Controller:
                 "status": "planned_for_pre_generation_extraction",
                 "source": "preceding observable EventStore prefix",
                 "eligible_event_ids": list(eligible_event_ids),
+                "encoding_scope": scope_plan.scope,
+                "encoding_event_groups": [list(group) for group in scope_plan.event_groups],
+                "pending_raw_event_ids": list(scope_plan.pending_event_ids),
+                "eligible_encoder_unit_ids": eligible_unit_ids,
                 "eligible_source_indices": sorted(eligible_source_indices),
                 "whole_event_encoded_source_indices": sorted(
                     {
@@ -995,13 +1057,11 @@ class EventNativeS0Controller:
                 "eligible_presented_encoder_tokens": sum(
                     len(chunk.token_ids) for chunk in eligible_chunks
                 ),
-                "eligible_unique_encoder_tokens": sum(
-                    max(chunk.source_token_end for chunk in eligible_chunks if chunk.event_id == event_id)
-                    for event_id in eligible_event_ids
-                )
-                if eligible_event_ids
-                else 0,
+                "eligible_unique_encoder_tokens": self._unique_encoder_tokens(
+                    eligible_chunks
+                ),
                 "retained_event_ids": list(view.gist_event_ids),
+                "retained_encoder_unit_ids": retained_unit_ids,
                 "retained_chunk_count": len(measure.memory.chunks),
                 "retained_presented_encoder_tokens": sum(
                     len(chunk.token_ids) for chunk in measure.memory.chunks
@@ -1028,7 +1088,21 @@ class EventNativeS0Controller:
             "compression_ratio": compression_ratio,
             "no_eligible_history": not eligible_event_ids,
             "full_source_coverage": coverage["complete_history_coverage"],
-            "atomic_packing_unit": "whole_event_all_encoder_chunks",
+            "encoding_scope": scope_plan.scope,
+            "pending_encoding_event_ids": list(scope_plan.pending_event_ids),
+            "atomic_packing_unit": (
+                "whole_event_all_encoder_chunks"
+                if scope_plan.scope == "current"
+                else "complete_event"
+                if scope_plan.scope == "event"
+                else "complete_record_or_paragraph"
+                if scope_plan.scope == "record"
+                else "source_bound_record_or_current_event"
+                if scope_plan.scope == "record_bound"
+                else "source_bound_multi_record_tool_result_or_current_event"
+                if scope_plan.scope == "record_bound_structural"
+                else "two_adjacent_complete_events"
+            ),
             "min_gist_reservation_required": bool(eligible_event_ids),
             "min_gist_reservation_met": (
                 bool(view.gist_event_ids) if eligible_event_ids else None
@@ -1082,17 +1156,16 @@ class EventNativeS0Controller:
         common_tokens,
         max_new_tokens,
     ):
-        priority = self._gist_priority(store, eligible_event_ids)
-        candidates = priority if priority else [None]
+        priority = self._gist_group_priority(store, eligible_event_ids)
+        candidates = priority if priority else [()]
         skipped = []
-        for event_id in candidates:
-            gist_ids = () if event_id is None else (event_id,)
+        for event_group in candidates:
             measure = self._try_measure(
                 store,
                 tools,
                 raw_ids,
                 mandatory_ids,
-                gist_ids,
+                event_group,
                 eligible_event_ids,
                 common_tokens,
                 max_new_tokens,
@@ -1100,7 +1173,8 @@ class EventNativeS0Controller:
             if measure is None or measure.reasons:
                 skipped.append(
                     {
-                        "event_id": event_id,
+                        "event_id": event_group[0] if event_group else None,
+                        "event_ids": list(event_group),
                         "reasons": (
                             ["packing_budget_exceeded"]
                             if measure is None
@@ -1114,10 +1188,11 @@ class EventNativeS0Controller:
                 "satisfied": bool(measure.memory.view.gist_event_ids)
                 if eligible_event_ids
                 else True,
-                "reserved_event_id": event_id,
+                "reserved_event_id": event_group[0] if event_group else None,
+                "reserved_event_ids": list(event_group),
                 "reserved_gist_bytes": (
                     0
-                    if event_id is None
+                    if not event_group
                     else max(
                         row["history_gist_tokens"] * self.kv_bytes_per_token
                         for row in measure.per_ratio.values()
@@ -1143,23 +1218,24 @@ class EventNativeS0Controller:
         common_tokens,
         max_new_tokens,
     ):
-        priority = self._gist_priority(store, eligible_event_ids)
-        candidates = priority if priority else [None]
+        priority = self._gist_group_priority(store, eligible_event_ids)
+        candidates = priority if priority else [()]
         rows = []
-        for event_id in candidates:
+        for event_group in candidates:
             measure = self._try_measure(
                 store,
                 tools,
                 raw_ids,
                 mandatory_ids,
-                () if event_id is None else (event_id,),
+                event_group,
                 eligible_event_ids,
                 common_tokens,
                 max_new_tokens,
             )
             rows.append(
                 {
-                    "event_id": event_id,
+                    "event_id": event_group[0] if event_group else None,
+                    "event_ids": list(event_group),
                     "reasons": ["packing_budget_exceeded"]
                     if measure is None
                     else list(measure.reasons),
@@ -1194,6 +1270,7 @@ class EventNativeS0Controller:
         *,
         derived_messages=(),
     ) -> _Measurement | None:
+        derived_messages = self._merge_protected_derived(derived_messages)
         known = {event.event_id for event in store.events}
         raw = set(raw_ids)
         gist = set(gist_ids)
@@ -1216,7 +1293,16 @@ class EventNativeS0Controller:
                 chunk_overlap=self.packing.chunk_overlap,
                 max_chunks=self.packing.max_chunks,
                 derived_workspace_prefix_messages=derived_messages,
+                encoding_scope=validate_encoding_scope(self.encoding_scope),
+                atomic_unit_token_limit=self._atomic_unit_token_limit(),
+                encoding_event_groups=plan_encoding_scope(
+                    store,
+                    eligible_event_ids,
+                    validate_encoding_scope(self.encoding_scope),
+                ).event_groups,
             )
+        except EncodingScopeCapacityError:
+            raise
         except PackingBudgetError:
             return None
         raw_prompt_tokens = len(memory.system_input_ids) + len(memory.workspace_input_ids)
@@ -1402,22 +1488,61 @@ class EventNativeS0Controller:
             )
         )
 
-    @staticmethod
-    def _gist_priority(store, event_ids):
-        ordered = list(event_ids)
-        if not ordered:
+    def _gist_group_priority(self, store, event_ids):
+        groups = list(
+            plan_encoding_scope(
+                store,
+                event_ids,
+                validate_encoding_scope(self.encoding_scope),
+            ).event_groups
+        )
+        if not groups:
             return []
         return [
-            ordered[0],
-            *(
-                event.event_id
-                for event in sorted(
-                    (store.event(event_id) for event_id in ordered[1:]),
-                    key=lambda event: max(event.source_indices),
-                    reverse=True,
-                )
+            groups[0],
+            *sorted(
+                groups[1:],
+                key=lambda group: max(
+                    index
+                    for event_id in group
+                    for index in store.event(event_id).source_indices
+                ),
+                reverse=True,
             ),
         ]
+
+    def _atomic_unit_token_limit(self):
+        limits = [self.packing.max_encoder_tokens, self.packing.max_sequence_tokens]
+        if self.model_context is not None:
+            limits.append(self.model_context)
+        return min(limits)
+
+    def _merge_protected_derived(self, derived_messages):
+        protected = tuple(self.protected_recovery_messages)
+        supplied = tuple(derived_messages)
+        protected_matches = [False] * len(protected)
+        native = []
+        # Wrappers can pass ``(bridge, *prepared_derived)``. Remove one supplied
+        # copy of each protected message wherever it appears, then restore the
+        # canonical protected prefix exactly once.
+        for candidate in supplied:
+            matched = False
+            for index, message in enumerate(protected):
+                if not protected_matches[index] and candidate == message:
+                    protected_matches[index] = True
+                    matched = True
+                    break
+            if not matched:
+                native.append(candidate)
+        return (*protected, *native)
+
+    @staticmethod
+    def _unique_encoder_tokens(chunks):
+        unit_ids = {chunk.event_id for chunk in chunks}
+        return sum(
+            max(chunk.source_token_end for chunk in chunks if chunk.event_id == unit_id)
+            for unit_id in unit_ids
+        )
 
     @staticmethod
     def _max_history_bytes(measure):
@@ -1510,6 +1635,21 @@ class EventNativeS0Controller:
 def _ordered_ids(store, ids):
     selected = set(ids)
     return tuple(event.event_id for event in store.events if event.event_id in selected)
+
+
+def _validate_append_only_tools(previous_json, current):
+    """Allow BFCL's documented mid-session tool reveal without rewriting history."""
+    previous = json.loads(previous_json)
+    current = list(current)
+    if (
+        not isinstance(previous, list)
+        or len(current) <= len(previous)
+        or current[: len(previous)] != previous
+    ):
+        raise PolicyInputError(
+            "Tools changed within a session; only append-only tool catalog "
+            "extensions are allowed"
+        )
 
 
 def _copy_reconsideration(value):

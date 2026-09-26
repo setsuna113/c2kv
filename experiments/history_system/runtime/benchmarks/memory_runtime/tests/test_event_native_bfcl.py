@@ -79,8 +79,11 @@ def _benchmark_dir(path: Path) -> Path:
     return path
 
 
-def test_validate_server_identity_accepts_matching_fresh_endpoint() -> None:
-    wrapper.validate_server_identity(_ready(), _health())
+@pytest.mark.parametrize('policy', sorted(wrapper.SUPPORTED_SESSION_CACHE_POLICIES))
+def test_validate_server_identity_accepts_matching_fresh_endpoint(policy) -> None:
+    ready, health = _ready(), _health()
+    ready['session_cache_policy'] = health['session_cache_policy'] = policy
+    wrapper.validate_server_identity(ready, health)
 
 
 @pytest.mark.parametrize('source', ['ready', 'health', 'both'])

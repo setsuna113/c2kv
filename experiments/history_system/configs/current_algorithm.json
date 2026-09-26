@@ -11,7 +11,7 @@
     "seed": 0,
     "temperature": 0
   },
-  "session_cache_policy": "last-final-view-memo-only-v1",
+  "session_cache_policy": "external-sglang-content-addressed-chunks-v1",
   "limits": {
     "extraction_calls_per_task": 1152,
     "generation_attempts_per_task": 96,
@@ -33,10 +33,13 @@
     "shadow_feature_config": "configs/shadow_features.json",
     "server_module": "benchmarks.memory_runtime.event_native_server",
     "official_worker_module": "benchmarks.memory_runtime.event_native_bfcl",
-    "device": "npu:0",
+    "generation_backend": "sglang",
+    "sglang_backend_url": "http://127.0.0.1:36100",
+    "sglang_timeout_seconds": 10800,
+    "device": "cpu",
     "dtype": "bfloat16",
     "bfcl_python": "/home/liuyancheng/envs/bench/bin/python",
-    "npu_allocator_metrics": true
+    "npu_allocator_metrics": false
   },
   "retry_contract": {
     "automatic_reruns": 0,

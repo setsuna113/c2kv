@@ -79,6 +79,19 @@ def test_observation_changes_decision_without_changing_frozen_task(tmp_path):
     assert runner.calls[0]["decision_key"] != runner.calls[1]["decision_key"]
 
 
+def test_gp_appworld_feedback_preserves_user_turn_boundary(tmp_path):
+    from types import SimpleNamespace
+
+    transport, runner = api(tmp_path)
+    runner.controller = SimpleNamespace(gp={"L": "user_turn"})
+    wire = request()
+    transport.handle_chat(wire)
+    wire["messages"].extend([{"role": "assistant", "content": "print('one')"},
+                             {"role": "user", "content": "one"}])
+    transport.handle_chat(wire)
+    assert [row["decision_key"] for row in runner.calls] == ["turn-0/step-0", "turn-0/step-1"]
+
+
 def test_real_toolsandbox_history_and_tools_reach_native_runner_unchanged(tmp_path):
     transport, runner = api(
         tmp_path, benchmark="toolsandbox",

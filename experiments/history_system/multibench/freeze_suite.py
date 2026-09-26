@@ -228,6 +228,7 @@ def freeze_suite(
     server_ready_seconds: int = 900,
     port_base: int = 42000,
     model_name: str | None = None,
+    sglang_backend_url: str = "http://127.0.0.1:36100",
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"Frozen suite output already exists: {output}")
@@ -291,12 +292,16 @@ def freeze_suite(
             "history_view_protocol": "fixed-budget-main",
             "ratio": 8,
             "dtype": "bfloat16",
-            "device": "npu:0",
+            "device": "cpu",
+            "generation_backend": "sglang",
+            "sglang_backend_url": sglang_backend_url,
+            "sglang_timeout_seconds": server_wall_seconds_per_task,
+            "session_cache_policy": "external-sglang-content-addressed-chunks-v1",
             "prefill_chunk_size": 256,
             "decode_strategy": "incremental",
             "sampling": {"mode": "greedy", "temperature": 0, "seed": 0},
             "no_raw_snapshot": True,
-            "npu_allocator_metrics": True,
+            "npu_allocator_metrics": False,
             "torch_threads": 4,
             "controller": "configs/controller.json",
             "eval_policy": "configs/eval_policy.json",
@@ -324,10 +329,8 @@ def freeze_suite(
             "fresh_server_per_task": True,
             "infra_failure_remains_in_denominator": True,
             "continue_after_task_infra_failure": True,
-            "outer_launch_wrapper": (
-                "/bin/bash /home/liuyancheng/c2kv-a-runtime-20260907/"
-                "native_npu_cost_tf58_v1/launch.sh"
-            ),
+            "external_generation_engine": sglang_backend_url,
+            "process_local_npu_allocator_metrics": False,
         },
     }
     save_json(submitted / "suite.json", suite)
@@ -396,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--server-python", default="/home/liuyancheng/envs/sgl/bin/python")
     parser.add_argument("--official-python", default="/home/liuyancheng/envs/sgl/bin/python")
+    parser.add_argument("--sglang-backend-url", default="http://127.0.0.1:36100")
     parser.add_argument("--max-decisions-per-task", type=int, default=96)
     parser.add_argument("--server-wall-seconds-per-task", type=int, default=10800)
     parser.add_argument("--official-wall-seconds-per-task", type=int, default=10800)
@@ -423,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         server_ready_seconds=args.server_ready_seconds,
         port_base=args.port_base,
         model_name=args.model_name,
+        sglang_backend_url=args.sglang_backend_url,
     )
     print(json.dumps(receipt, ensure_ascii=False))
     return 0

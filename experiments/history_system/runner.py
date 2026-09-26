@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 
 HERE = Path(__file__).resolve().parent
@@ -69,6 +70,47 @@ def _bfcl_python(design: dict, args: argparse.Namespace, server_python: str) -> 
     return requested or bound or server_python
 
 
+def _generation_backend_arguments(design: dict) -> list[str]:
+    runtime = design.get("runtime")
+    if not isinstance(runtime, dict):
+        raise ValueError("Runtime contract is missing")
+    backend = runtime.get("generation_backend", "native")
+    if backend not in {"native", "sglang"}:
+        raise ValueError("runtime.generation_backend must be native or sglang")
+    controller_path = (ROOT / runtime["controller"]).resolve()
+    controller = read(controller_path)
+    requires_sglang = (
+        "post_draft_recovery" in controller or "gp_experiments" in controller
+    )
+    if requires_sglang and backend != "sglang":
+        raise ValueError("D3 post_draft_recovery and G--P require the SGLang backend")
+    url = runtime.get("sglang_backend_url")
+    if backend == "native":
+        if url is not None:
+            raise ValueError("runtime.sglang_backend_url requires the SGLang backend")
+        return ["--generation-backend", "native"]
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("SGLang backend requires runtime.sglang_backend_url")
+    url = url.strip().rstrip("/")
+    parsed = urlsplit(url)
+    if (parsed.scheme != "http" or not parsed.netloc
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError("runtime.sglang_backend_url must be a bare HTTP base URL")
+    timeout = runtime.get("sglang_timeout_seconds")
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("runtime.sglang_timeout_seconds must be positive and finite")
+    if runtime.get("npu_allocator_metrics") is not False:
+        raise ValueError("SGLang runtime must explicitly disable process-local NPU allocator metrics")
+    if runtime.get("device") != "cpu":
+        raise ValueError("SGLang controller runtime must use device=cpu")
+    return [
+        "--generation-backend", "sglang",
+        "--sglang-backend-url", url,
+        "--sglang-timeout-seconds", str(timeout),
+    ]
+
+
 def checkpoint_binding(design: dict) -> dict:
     binding = design.get("checkpoint_selection")
     if not isinstance(binding, dict) or any(key not in binding for key in CHECKPOINT_FIELDS):
@@ -123,10 +165,16 @@ def validate(design: dict, *, allow_development: bool) -> None:
         raise ValueError("Zero automatic retry/rerun contract changed")
     if (design["route"] != "ac_native_s0_lexical_raw_reserve_failed_operation"
         or design["compression_policy"] != "always-compress-v1"
-        or design["session_cache_policy"] != "last-final-view-memo-only-v1"
         or design["ratio"] not in SUPPORTED_RATIOS or design["prefill_chunk_size"] != 256
         or design["sampling"] != {"mode":"greedy", "temperature":0, "seed":0, "max_completion_tokens":4096}):
         raise ValueError("This search round keeps the current C0 ratio4/8 inference contract")
+    expected_cache_policy = (
+        "external-sglang-content-addressed-chunks-v1"
+        if design["runtime"].get("generation_backend") == "sglang"
+        else "last-final-view-memo-only-v1"
+    )
+    if design.get("session_cache_policy") != expected_cache_policy:
+        raise ValueError("Session cache policy differs from the generation backend")
     checkpoint_binding(design)
     for name, expected in design["source_files"].items():
         path = (ROOT / name).resolve()
@@ -135,6 +183,7 @@ def validate(design: dict, *, allow_development: bool) -> None:
     for key in ("controller", "eval_policy", "eval_capacity"):
         if read(ROOT / design["runtime"][key]) != design["resolved_configs"][key]:
             raise ValueError(f"Resolved candidate configuration changed: {key}")
+    _generation_backend_arguments(design)
     policy = design["resolved_configs"]["eval_policy"]["policy"]
     cap = min(policy["history_budget_bytes"], policy["workspace_budget_bytes"])
     if not 0 < cap <= design["search_contract"]["B0_history_bytes"]:
@@ -257,6 +306,7 @@ def server_command(
     if design["runtime"].get("shadow_feature_config"):
         command.extend(["--shadow-feature-config",
                         str((ROOT / design["runtime"]["shadow_feature_config"]).resolve())])
+    command.extend(_generation_backend_arguments(design))
     command.append("--no-raw-snapshot")
     return command
 
@@ -468,6 +518,16 @@ def _worker_failed_without_official_summary(
     return worker_returncode not in (None, 0) and not official_summary.exists()
 
 
+def _server_runtime_failure(shard: Path, server_returncode: int | None) -> bool:
+    """A BFCL zero score does not turn a crashed actor server into a valid rollout."""
+    final_path = shard / "server" / "final.json"
+    if final_path.exists():
+        final = json.loads(final_path.read_text(encoding="utf-8"))
+        if final.get("stop_reason") == "runner_failed":
+            return True
+    return server_returncode not in (None, 0)
+
+
 def run(design: dict, args: argparse.Namespace) -> int:
     validate(design, allow_development=False)
     if "{" in design["run_id_template"] or "}" in design["run_id_template"]:
@@ -612,14 +672,17 @@ def run(design: dict, args: argparse.Namespace) -> int:
                 server_code = _stop_server(active, supervisor)
                 active = None
             official_summary = shard / "bfcl" / "official_summary.json"
+            runtime_failed = _server_runtime_failure(shard, server_code)
             outcome = {
                 "task_id": task_id,
-                "outcome": "official_completed" if worker_code == 0 and official_summary.exists()
+                "outcome": "runtime_failure_in_denominator" if runtime_failed
+                           else "official_completed" if worker_code == 0 and official_summary.exists()
                            else "failed_in_denominator",
                 "in_fixed_denominator": True,
                 "worker_returncode": worker_code,
                 "server_returncode": server_code,
                 "official_summary": str(official_summary) if official_summary.exists() else None,
+                "runtime_completed": not runtime_failed,
             }
             record["task_outcomes"].append(outcome)
             record["completed_task_cells"] = len(record["task_outcomes"])
@@ -628,6 +691,11 @@ def run(design: dict, args: argparse.Namespace) -> int:
             active_supervisor = None
             active_bfcl_running = None
             save(manifest, record)
+            if runtime_failed:
+                outcome["dispatch_stop_reason"] = "actor_runtime_failure_even_if_officially_scored"
+                terminalize(record, status="stopped_on_actor_runtime_failure", started=started)
+                save(manifest, record)
+                return 6
             if _worker_failed_without_official_summary(worker_code, official_summary):
                 outcome["dispatch_stop_reason"] = (
                     "worker_failure_without_official_summary"

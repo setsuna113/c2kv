@@ -1,0 +1,47 @@
+{
+  "schema": "a-history-gp-v1",
+  "G": "current",
+  "U": "tokens_1024",
+  "B": "source",
+  "Q": "archive_rrf",
+  "K": 4,
+  "L": "next_decision",
+  "R": 1,
+  "D": "candidate_rule",
+  "P": "quoted",
+  "order": "chronological",
+  "candidate_limit": 8,
+  "selection_threshold": 0.0,
+  "backend": null,
+  "candidate_scorer": null,
+  "selection_protocol": "evidence_sets_v1",
+  "set_selector": "candidate_rule",
+  "retrieval_limit": 24,
+  "retrieval_route_limit": 16,
+  "rrf_k": 60,
+  "fallback_unit": null,
+  "recovery_reserve_tokens": 0,
+  "selector_threshold": 0.5,
+  "gain_delta": 0.0,
+  "export_selection_state": false,
+  "local_models": {
+    "embedding": {
+      "model_name_or_path": "Qwen/Qwen3-Embedding-0.6B",
+      "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
+      "device": "cpu",
+      "local_files_only": true
+    },
+    "reranker": {
+      "model_name_or_path": "Qwen/Qwen3-Reranker-0.6B",
+      "revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+      "device": "cpu",
+      "local_files_only": true
+    },
+    "selector": {
+      "model_name_or_path": "Qwen/Qwen3-4B-Instruct-2507",
+      "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+      "device": "cpu",
+      "local_files_only": true
+    }
+  }
+}

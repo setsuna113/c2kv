@@ -1,4 +1,5 @@
-"""SGLang c2kv fork backend (kvoffload-sglang-c2kv, branch c2kv-sglang-bfcl).
+"""SGLang c2kv fork backend (kvoffload-sglang-c2kv; consolidated local line
+task/final-system-integration, a superset of origin/c2kv-sglang-bfcl).
 
 Wire protocol (verified live against 22fbf3146 on NPU, docs/sglang_migration.md):
 * ``POST /v1/c2kv/extract`` — same request/response shape as hf_server
@@ -51,9 +52,39 @@ packing and explicit repair placement independently of that choice.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from .base import Backend, BackendError
+
+
+def detect_sglang_commit() -> Optional[str]:
+    """Best-effort provenance of the serving checkout behind this backend.
+
+    Resolution order: an explicit ``C2KV_SGLANG_COMMIT`` value, then
+    ``git rev-parse HEAD`` in ``C2KV_SGLANG_DIR``.  Returns None when the
+    serving build cannot be identified (e.g. a tarball deployment without
+    a stamp); callers must record the None instead of guessing a commit.
+    """
+
+    explicit = (os.environ.get("C2KV_SGLANG_COMMIT") or "").strip()
+    if explicit:
+        return explicit
+    sglang_dir = (os.environ.get("C2KV_SGLANG_DIR") or "").strip()
+    if not sglang_dir:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", sglang_dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip() or None
 
 
 def _normalize_tool_schema(value: Any, defs: Dict[str, Any] = None,
@@ -327,7 +358,15 @@ class SglangBackend(Backend):
             # Upstream returns the current block unchanged and issues no
             # extract; no hint is sent, so such a row simply carries no
             # history_kv_* cost columns.
-            return list(messages), None, session_id
+            # Initialize canonical-prefix tracking on the very first request.
+            # Otherwise a later compressed request appends the full first
+            # prompt again to a session that already owns its KV.
+            hint = None
+            if session_id and str(spec["backend"]) == "physical_eviction":
+                hint = {"persistent_history_session": {"enabled": True},
+                        "history_kv_method": method,
+                        "history_kv_backend": "physical_eviction"}
+            return list(messages), hint, session_id
 
         if str(spec["backend"]) == "physical_eviction":
             count = int(history["history_message_count"])

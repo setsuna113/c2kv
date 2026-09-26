@@ -1,0 +1,134 @@
+{
+  "schema": "proposal-h0-d128-source-catalog-v1",
+  "methods": {
+    "E07": {
+      "source_package": "/home/liuyancheng/c2kv-evidence-sets-20260916/eval_trained_v5/C1/canonical_full20",
+      "source_lane": "C1",
+      "artifact_path": "/home/liuyancheng/c2kv-evidence-sets-20260916/eval_trained_v5/C1/canonical_full20/lanes/C1/trained_artifact.json",
+      "shards": [
+        {
+          "shard_id": "E07_part0",
+          "device": 0,
+          "engine_port": 45100,
+          "task_port_base": 45200
+        },
+        {
+          "shard_id": "E07_part1",
+          "device": 1,
+          "engine_port": 45101,
+          "task_port_base": 45230
+        },
+        {
+          "shard_id": "E07_part2",
+          "device": 2,
+          "engine_port": 45102,
+          "task_port_base": 45260
+        },
+        {
+          "shard_id": "E07_part3",
+          "device": 3,
+          "engine_port": 45103,
+          "task_port_base": 45290
+        },
+        {
+          "shard_id": "E07_part4",
+          "device": 4,
+          "engine_port": 45104,
+          "task_port_base": 45320
+        },
+        {
+          "shard_id": "E07_part5",
+          "device": 6,
+          "engine_port": 45105,
+          "task_port_base": 45350
+        }
+      ]
+    },
+    "E09": {
+      "source_package": "/home/liuyancheng/c2kv-evidence-sets-20260916/eval_trained_v5/C4_turn/canonical_full20",
+      "source_lane": "C4_turn",
+      "artifact_path": "/home/liuyancheng/c2kv-evidence-sets-20260916/proposal_h0_t02_v1/artifacts/c4_gain_turn.json",
+      "shards": [
+        {
+          "shard_id": "E09_part0",
+          "device": 0,
+          "engine_port": 46100,
+          "task_port_base": 46200
+        },
+        {
+          "shard_id": "E09_part1",
+          "device": 1,
+          "engine_port": 46101,
+          "task_port_base": 46230
+        },
+        {
+          "shard_id": "E09_part2",
+          "device": 2,
+          "engine_port": 46102,
+          "task_port_base": 46260
+        },
+        {
+          "shard_id": "E09_part3",
+          "device": 3,
+          "engine_port": 46103,
+          "task_port_base": 46290
+        },
+        {
+          "shard_id": "E09_part4",
+          "device": 4,
+          "engine_port": 46104,
+          "task_port_base": 46320
+        },
+        {
+          "shard_id": "E09_part5",
+          "device": 6,
+          "engine_port": 46105,
+          "task_port_base": 46350
+        }
+      ]
+    },
+    "E11": {
+      "source_package": "/home/liuyancheng/c2kv-evidence-sets-20260916/eval_trained_v5/C4_task/canonical_full20",
+      "source_lane": "C4_task",
+      "artifact_path": "/home/liuyancheng/c2kv-evidence-sets-20260916/proposal_h0_t02_v1/artifacts/c4_gain_task.json",
+      "shards": [
+        {
+          "shard_id": "E11_part0",
+          "device": 0,
+          "engine_port": 47100,
+          "task_port_base": 47200
+        },
+        {
+          "shard_id": "E11_part1",
+          "device": 1,
+          "engine_port": 47101,
+          "task_port_base": 47230
+        },
+        {
+          "shard_id": "E11_part2",
+          "device": 2,
+          "engine_port": 47102,
+          "task_port_base": 47260
+        },
+        {
+          "shard_id": "E11_part3",
+          "device": 3,
+          "engine_port": 47103,
+          "task_port_base": 47290
+        },
+        {
+          "shard_id": "E11_part4",
+          "device": 4,
+          "engine_port": 47104,
+          "task_port_base": 47320
+        },
+        {
+          "shard_id": "E11_part5",
+          "device": 6,
+          "engine_port": 47105,
+          "task_port_base": 47350
+        }
+      ]
+    }
+  }
+}

@@ -92,6 +92,8 @@ def _terminate_owned_process(proc, timeout: float = 5.0) -> None:
 
 
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
+                benchmark: str = "",
+                model_family: str = "",
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
@@ -109,6 +111,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     command = [
         python_bin or sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
+        "--benchmark", benchmark,
+        "--model-family", model_family,
         "--port", str(port), "--request-log", str(log_path),
         "--doc-packing", doc_packing,
         "--max-doc-length", str(max_doc_length),
@@ -263,6 +267,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                              "tau2 agent/user LLMs and the BFCL handler "
                              "both use it; toolsandbox role keys are "
                              "separate, see --ts-agent)")
+    parser.add_argument("--model-family", default="",
+                        help="served model family; multi-turn history arms require qwen3-4b")
     parser.add_argument("--checkpoint", type=Path,
                         help="local checkpoint served by --upstream")
     parser.add_argument("--checkpoint-profile", type=Path,
@@ -378,6 +384,8 @@ def main(argv=None):
     log_dir.mkdir(exist_ok=True)
     proxy_proc, request_log = start_proxy(
         args.upstream, args.arm, args.proxy_port, log_dir,
+        benchmark=args.benchmark,
+        model_family=args.model_family,
         record_reference=args.record_reference, reference=args.reference,
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
@@ -409,7 +417,7 @@ def main(argv=None):
     summary["num_workers"] = args.num_workers
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight.as_dict()
-    if get_arm(args.arm).text_policy:
+    if get_arm(args.arm).text_policy or get_arm(args.arm).history_method:
         # text-arm consumers: degeneration and compressor cost surfaced at
         # the RUN level (the per-request stats live in the request log)
         ta_rows = []

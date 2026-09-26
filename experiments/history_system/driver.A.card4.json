@@ -1,0 +1,48 @@
+{
+  "run_root": "/home/liuyancheng/gp_search_v1",
+  "engine_port": 36140,
+  "port_base": 36600,
+  "checkpoint": "/home/liuyancheng/c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000",
+  "benchmark_dir": "/home/liuyancheng/benchmarks/gorilla/berkeley-function-call-leaderboard",
+  "python": "/home/liuyancheng/envs/sgl/bin/python",
+  "bfcl_python": "/home/liuyancheng/envs/bench/bin/python",
+  "candidates": [
+    {
+      "candidate_id": "gp_547d32993050",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_547d32993050"
+    },
+    {
+      "candidate_id": "gp_30628189bf17",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_30628189bf17"
+    },
+    {
+      "candidate_id": "gp_725545091266",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_725545091266"
+    },
+    {
+      "candidate_id": "gp_dd8308a8dcaf",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_dd8308a8dcaf"
+    },
+    {
+      "candidate_id": "gp_7b76f099db6a",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_7b76f099db6a"
+    },
+    {
+      "candidate_id": "gp_32e20dad368a",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_32e20dad368a"
+    },
+    {
+      "candidate_id": "gp_643ea8720de7",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_643ea8720de7"
+    },
+    {
+      "candidate_id": "gp_7bb8e27f0519",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_7bb8e27f0519"
+    },
+    {
+      "candidate_id": "gp_b21671aacdf2",
+      "directory": "/home/liuyancheng/gp_search_v1/candidates/A__gp_b21671aacdf2"
+    }
+  ],
+  "retry_failed": true
+}

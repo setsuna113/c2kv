@@ -374,6 +374,22 @@ class TestPhysicalEvictionPath:
         assert hint["persistent_history_session"] == {"enabled": True}
         assert hint["history_kv_eviction"]["persistent_session"] is True
 
+    def test_first_request_initializes_persistent_prefix_without_eviction(self):
+        ctx = {"spec": history_kv_spec(self.SESSION_ARM), "history_out_indices": [],
+               "history_text": "", "session_id": "first-session"}
+        prepared = SglangBackend(FakePost({})).prepare_chat(
+            {"messages": [{"role": "user", "content": "start"}]},
+            self.SESSION_ARM, None, context={"history_kv": ctx})
+        assert prepared["c2kv_kv_memory_hint"]["persistent_history_session"]["enabled"]
+        assert "history_kv_eviction" not in prepared["c2kv_kv_memory_hint"]
+
+    def test_task_identity_does_not_shift_after_first_assistant(self):
+        first = [{"role": "user", "content": "start"}]
+        second = first + [{"role": "assistant", "content": "working"}]
+        ctx = {"task_id": "task-a"}
+        assert proxy_mod.history_conversation_id(first, ctx) == proxy_mod.history_conversation_id(second, ctx)
+        assert proxy_mod.history_conversation_id(first, ctx) != proxy_mod.history_conversation_id(first, {"task_id": "task-b"})
+
     def test_open_session_payload(self):
         post = FakePost({"/open_session": lambda p: p["session_id"]})
         assert SglangBackend(post).open_history_session("sess-2", timeout=300) == "sess-2"

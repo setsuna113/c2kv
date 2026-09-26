@@ -112,12 +112,16 @@ def _frozen_package(root: Path) -> dict:
             "history_view_protocol": "fixed-budget-main",
             "ratio": 8,
             "dtype": "bfloat16",
-            "device": "npu:0",
+            "device": "cpu",
+            "generation_backend": "sglang",
+            "sglang_backend_url": "http://127.0.0.1:36100",
+            "sglang_timeout_seconds": 10800,
+            "session_cache_policy": "external-sglang-content-addressed-chunks-v1",
             "prefill_chunk_size": 256,
             "decode_strategy": "incremental",
             "sampling": {"mode": "greedy", "temperature": 0, "seed": 0},
             "no_raw_snapshot": True,
-            "npu_allocator_metrics": True,
+            "npu_allocator_metrics": False,
             "controller": "configs/controller.json",
             "eval_policy": "configs/eval_policy.json",
             "eval_capacity": "configs/eval_capacity.json",
@@ -164,6 +168,11 @@ def test_preview_preserves_order_and_fixed_runtime_contract(tmp_path: Path) -> N
     assert first["server"][first["server"].index("--ratio") + 1] == "8"
     assert first["server"][first["server"].index("--source-profile") + 1] == "openai-single-task-v1"
     assert first["server"][first["server"].index("--max-generation-calls") + 1] == "96"
+    assert first["server"][first["server"].index("--generation-backend") + 1] == "sglang"
+    assert first["server"][first["server"].index("--sglang-backend-url") + 1] == (
+        "http://127.0.0.1:36100"
+    )
+    assert "--npu-allocator-metrics" not in first["server"]
     assert "--shadow-feature-config" in first["server"]
     assert first["official"][first["official"].index("--base-url") + 1].endswith("43000/v1")
     second = preview["cells"][1]
@@ -458,8 +467,16 @@ def test_freeze_copies_and_hashes_runtime_adapter_configs_and_tasks(tmp_path: Pa
     assert receipt["status"] == "frozen_not_launched"
     assert receipt["model_calls"] == receipt["scorer_calls"] == 0
     submitted = output / "submitted"
+    frozen = suite_runner.read_json(submitted / "suite.json")
+    assert frozen["runtime"]["generation_backend"] == "sglang"
+    assert frozen["runtime"]["sglang_backend_url"] == "http://127.0.0.1:36100"
+    assert frozen["runtime"]["session_cache_policy"] == (
+        "external-sglang-content-addressed-chunks-v1"
+    )
+    assert frozen["runtime"]["device"] == "cpu"
+    assert frozen["runtime"]["npu_allocator_metrics"] is False
     suite_runner.validate_suite(
-        suite_runner.read_json(submitted / "suite.json"), submitted.resolve()
+        frozen, submitted.resolve()
     )
     manifest = suite_runner.read_json(submitted / "package.manifest.json")
     assert "runtime/source.py" in manifest["files"]

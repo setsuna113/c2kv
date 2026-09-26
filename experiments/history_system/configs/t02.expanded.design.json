@@ -1,0 +1,90 @@
+{
+  "schema": "t02-expanded-collection-design-v1",
+  "status": "budget_authorized_waiting_for_user_resource_coordination",
+  "launch_authorized": false,
+  "purpose": "Train C1 risk and C4 evidence-set gain selectors for final algorithm selection",
+  "source_family_count": 26,
+  "categories": [
+    "multi_turn_base",
+    "multi_turn_long_context",
+    "multi_turn_miss_func",
+    "multi_turn_miss_param"
+  ],
+  "eligible_task_variants": 104,
+  "target_states": 120,
+  "target_train_states": 80,
+  "target_calibration_states": 40,
+  "minimum_source_families": 26,
+  "maximum_candidate_states_per_task_variant": 2,
+  "maximum_selected_states_per_source_family": 8,
+  "split_unit": "verified_source_family",
+  "forbidden_manifests": [
+    "tasks.R2D128.json",
+    "tasks.R2F128.json"
+  ],
+  "branches": [
+    "A0",
+    "A1",
+    "A2"
+  ],
+  "max_complete_branch_executions": 360,
+  "previous_branch_budget": 180,
+  "additional_branch_budget": 180,
+  "max_source_task_starts": 104,
+  "automatic_reruns": 0,
+  "runtime_device": "npu",
+  "selector_model": "Qwen3-4B-Instruct-2507",
+  "reference_cost": {
+    "source": "user-reported older D20 run about 50 minutes per 20 tasks per slot",
+    "additional_branch_only_slot_hours": 7.5,
+    "new_pipeline_measured": false,
+    "source_collection_included": false
+  },
+  "independent_group_count_increased": false,
+  "new_labels_required": true,
+  "old_detector_labels_merged": false,
+  "budget_authorized": true,
+  "resource_coordination_required": true,
+  "first_state_validation": {
+    "mode": "first_production_state_three_branches",
+    "included_in_branch_budget": true,
+    "abort_on_contract_failure": true,
+    "separate_full_smoke_default": false
+  },
+  "source_bindings": {
+    "tasks": {
+      "path": "outputs/history_system_search/evidence_sets_v1/tasks.t02.expanded104.json",
+      "sha256": "e163caa01bc1a36c9199089e8dc4daec3ec57b99ba47875789d603563cf19cb5"
+    },
+    "audit": {
+      "path": "outputs/history_system_search/evidence_sets_v1/data_expansion_audit.json",
+      "sha256": "24352d5c1de0e08928b855473d6cd32a3fe418271d9dffb9b2ac547b2d9bf50c"
+    },
+    "D128": {
+      "path": "outputs/history_system_search/evidence_sets_v1/recoverability/tasks.R2D128.json",
+      "sha256": "e6063f178788c0ace9cc20c3933e551baf0a2afa242b5a252af09b23bef3afc9"
+    },
+    "F128": {
+      "path": "outputs/history_system_search/evidence_sets_v1/recoverability/tasks.R2F128.json",
+      "sha256": "e28e684b349719afba88e5558b04cf3ea593f1b637be32361d2e7f578a196dd9"
+    }
+  },
+  "collection_order": "verified_source_family_round_robin",
+  "candidate_snapshot_cap": 208,
+  "exact_snapshot_host_byte_cap": 824633720832,
+  "runtime_template": {
+    "path": "outputs/history_system_search/evidence_sets_v1/t02.smoke.design.json",
+    "sha256": "ac38028df91c959f9fa05659ec458d505b3a625b7ea7f38c99f9500b491a7195"
+  },
+  "minimum_available_host_bytes": 1099511627776,
+  "snapshot_capacity_planning": {
+    "mode": "upper_bound_not_preallocated_memory",
+    "observed_gist_pool_tokens": 22190,
+    "observed_gist_bytes_per_token": 147472,
+    "source": "/home/liuyancheng/c2kv-evidence-sets-20260916/run/engine.log",
+    "full_pool_candidate_tensor_bytes": 680659965440,
+    "capacity_excludes_controller_python_objects": true,
+    "startup_available_memory_recheck_required": true,
+    "resource_coordination_required": true
+  }
+}

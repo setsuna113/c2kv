@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,152 @@ def test_allocator_flag_is_opt_in_and_reaches_child(tmp_path):
     child = server.parser().parse_args(server._child_command(measured)[3:])
     assert child.serve_child and child.npu_allocator_metrics
     assert child.device == 'npu:0'
+
+
+def test_sglang_backend_arguments_reach_supervised_child(tmp_path):
+    argv = [
+        '--checkpoint', str(tmp_path / 'checkpoint'), '--out', str(tmp_path / 'out'),
+        '--run-id', 'sglang-test', '--view-mode', 'static', '--ratio', '4',
+        '--max-new-tokens', '2', '--task-ids', 'synthetic-task', '--max-decisions', '1',
+        '--max-generation-calls', '1', '--max-extraction-calls', '2',
+        '--max-wall-seconds', '30', '--generation-backend', 'sglang',
+        '--sglang-backend-url', 'http://127.0.0.1:36100',
+        '--sglang-timeout-seconds', '12',
+    ]
+    parent = server.parser().parse_args(argv)
+    child = server.parser().parse_args(server._child_command(parent)[3:])
+    assert child.serve_child
+    assert child.generation_backend == 'sglang'
+    assert child.sglang_backend_url == 'http://127.0.0.1:36100'
+    assert child.sglang_timeout_seconds == 12
+    assert child.device == 'cpu'
+    assert child.npu_allocator_metrics is False
+
+
+@pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])
+def test_d3_controller_rejects_native_backend_before_output(tmp_path, entrypoint):
+    controller = tmp_path / 'controller.json'
+    controller.write_text(json.dumps({'post_draft_recovery': {}}), encoding='utf-8')
+    out = tmp_path / 'out'
+    args = SimpleNamespace(
+        out=out,
+        s0_config=controller,
+        generation_backend='native',
+        sglang_backend_url=None,
+        device='npu:0',
+        npu_allocator_metrics=False,
+    )
+    with pytest.raises(ValueError, match='require generation-backend=sglang'):
+        entrypoint(args)
+    assert not out.exists()
+    assert not server._supervisor_path(out).exists()
+
+
+@pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])
+def test_sglang_rejects_process_local_allocator_before_output(tmp_path, entrypoint):
+    out = tmp_path / 'out'
+    args = SimpleNamespace(
+        out=out,
+        s0_config=None,
+        generation_backend='sglang',
+        sglang_backend_url='http://127.0.0.1:36100',
+        max_extraction_calls=1,
+        device='cpu',
+        npu_allocator_metrics=True,
+    )
+    with pytest.raises(ValueError, match='cannot measure the external SGLang engine'):
+        entrypoint(args)
+    assert not out.exists()
+    assert not server._supervisor_path(out).exists()
+
+
+@pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])
+def test_sglang_rejects_full_recompute_metadata_before_output(tmp_path, entrypoint):
+    out = tmp_path / 'out'
+    args = SimpleNamespace(
+        out=out,
+        s0_config=None,
+        generation_backend='sglang',
+        sglang_backend_url='http://127.0.0.1:36100',
+        decode_strategy='full_recompute',
+        max_extraction_calls=1,
+        device='cpu',
+        npu_allocator_metrics=False,
+    )
+    with pytest.raises(ValueError, match='requires decode-strategy=incremental'):
+        entrypoint(args)
+    assert not out.exists()
+    assert not server._supervisor_path(out).exists()
+
+
+def test_sglang_generator_wiring_never_calls_native_loader(tmp_path, monkeypatch):
+    recorded = {}
+
+    class FakeGenerator:
+        def __init__(self, upstream, **kwargs):
+            recorded.update(upstream=upstream, **kwargs)
+
+    fake_module = types.ModuleType('history_memory.sglang_generator')
+    fake_module.SGLangEventNativeGenerator = FakeGenerator
+    monkeypatch.setitem(sys.modules, 'history_memory.sglang_generator', fake_module)
+    monkeypatch.setattr(
+        server,
+        'load_generator',
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError('native loader must not run for SGLang')
+        ),
+    )
+    args = SimpleNamespace(
+        generation_backend='sglang',
+        sglang_backend_url='http://127.0.0.1:36100',
+        sglang_timeout_seconds=17,
+        max_new_tokens=9,
+        max_generation_calls=3,
+        max_extraction_calls=7,
+        checkpoint=tmp_path / 'checkpoint-1000',
+    )
+    tokenizer = SimpleNamespace(eos_token_id=42)
+    profile = {'checkpoint': 'profile'}
+    generator, returned_profile = server._build_generator(
+        args,
+        profile=profile,
+        model_context=40960,
+        tokenizer=tokenizer,
+        journal_path=tmp_path / 'attempts.jsonl',
+        s0_config={'gp_experiments': {'G': 'record'}},
+        shadow_feature_config='shadow',
+    )
+    assert isinstance(generator, FakeGenerator)
+    assert returned_profile is profile
+    assert recorded == {
+        'upstream': 'http://127.0.0.1:36100',
+        'expected_model_path': (tmp_path / 'checkpoint-1000').resolve(),
+        'model_context': 40960,
+        'max_new_tokens': 9,
+        'max_generation_calls': 3,
+        'max_extraction_calls': 7,
+        'timeout_seconds': 17,
+        'eos_token_ids': (42,),
+        'eos_source': 'checkpoint_tokenizer.eos_token_id',
+        'journal_path': tmp_path / 'sglang_http.jsonl',
+        'sampling_params': {'temperature': 0.0, 'seed': 0},
+        'shadow_feature_config': 'shadow',
+        'encoding_scope': 'record',
+    }
+
+
+def test_checkpoint_generation_config_preserves_all_eos_ids(tmp_path):
+    checkpoint = tmp_path / 'checkpoint-1000'
+    checkpoint.mkdir()
+    (checkpoint / 'generation_config.json').write_text(
+        json.dumps({'eos_token_id': [151645, 151643]}), encoding='utf-8'
+    )
+    tokenizer = SimpleNamespace(eos_token_id=151645)
+
+    token_ids, source = server._checkpoint_eos_token_ids(checkpoint, tokenizer)
+
+    assert token_ids == (151645, 151643)
+    assert source == 'checkpoint_generation_config.eos_token_id'
 
 
 @pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])

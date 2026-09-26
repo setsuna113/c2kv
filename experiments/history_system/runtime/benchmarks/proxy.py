@@ -99,6 +99,7 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
+import history_methods
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 
@@ -296,6 +297,8 @@ class ExtractCache:
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
+BENCHMARK = ""
+MODEL_FAMILY = ""
 MEMORY_RUNTIME = None  # opt-in RuntimeAdapter, loaded in main()
 MEMORY_RUNTIME_BYTES_PER_KV_TOKEN: Optional[int] = None
 MEMORY_RUNTIME_FATAL_ERROR: Optional[str] = None
@@ -454,7 +457,7 @@ def _validate_memory_runtime_arm(runtime, arm: Arm) -> None:
     conflicts = [
         name for name in (
             "hybrid_top_k", "constrain_tools", "repair", "recover",
-            "text_policy", "history_kv", "kv_reuse", "gold_recovery",
+            "text_policy", "history_method", "history_kv", "kv_reuse", "gold_recovery",
             "native_messages",
         ) if getattr(arm, name, None)
     ]
@@ -513,6 +516,7 @@ def _apply_memory_runtime(messages, assembled, counts, eval_context, tools, *, s
         "byte_geometry_verified_by_backend": False,
     })
     try:
+        benchmark = eval_context.get("benchmark", "") if isinstance(eval_context, dict) else ""
         options = {}
         if getattr(MEMORY_RUNTIME, "source_needs_strategy", None) is not None:
             options["source_predictor"] = source_predictor
@@ -523,16 +527,19 @@ def _apply_memory_runtime(messages, assembled, counts, eval_context, tools, *, s
         if getattr(MEMORY_RUNTIME, "mode", None) == "raw_recency":
             # Select original source messages before the training-compatible
             # Full renderer inserts the system and normalizes tool actions.
-            options["render_full"] = lambda source: _assemble(source, get_arm("full"))
+            options["render_full"] = lambda source: _assemble(
+                source, get_arm("full"), benchmark=benchmark)
         elif (getattr(MEMORY_RUNTIME, "mode", None) in {
                 "capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
                 or getattr(MEMORY_RUNTIME, "route_mode", None) == "ac_gist_static"):
             if getattr(MEMORY_RUNTIME, "history_organization", None) == "subgoal-v1":
                 options["render_compressed"] = lambda source: _assemble(
                     source, get_arm("c2kv4"), doc_packing="subgoal",
-                    subgoal_session_id=str(eval_context["task_id"]))
+                    subgoal_session_id=str(eval_context["task_id"]),
+                    benchmark=benchmark)
             else:
-                options["render_compressed"] = lambda source: _assemble(source, get_arm("c2kv4"))
+                options["render_compressed"] = lambda source: _assemble(
+                    source, get_arm("c2kv4"), benchmark=benchmark)
         assembled, counts = MEMORY_RUNTIME.apply(
             messages, assembled, counts, eval_context, tools, **options)
     except MemoryRuntimeError:
@@ -582,7 +589,8 @@ def _prepare_memory_input(messages, eval_context, tools, *, source_predictor=Non
                    or getattr(MEMORY_RUNTIME, "mode", None)
                    in {"capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
                    else ARM)
-    assembled, counts = _assemble(messages, initial_arm)
+    benchmark = eval_context.get("benchmark", "") if isinstance(eval_context, dict) else ""
+    assembled, counts = _assemble(messages, initial_arm, benchmark=benchmark)
     assembled = _apply_actor_prompt_protocol(assembled)
     return _apply_memory_runtime(messages, assembled, counts, eval_context, tools,
                                  source_predictor=source_predictor)
@@ -617,11 +625,13 @@ def _apply_actor_prompt_protocol(assembled):
 
 
 def _prepare_exact_memory_input(messages, eval_context, tools):
-    assembled, counts = _assemble(messages, get_arm("full"))
+    benchmark = eval_context.get("benchmark", "") if isinstance(eval_context, dict) else ""
+    assembled, counts = _assemble(messages, get_arm("full"), benchmark=benchmark)
     try:
         assembled, counts, prepared = MEMORY_RUNTIME.prepare_exact(
             messages, assembled, counts, eval_context, tools,
-            render_compressed=lambda source: _assemble(source, get_arm("c2kv4")))
+            render_compressed=lambda source: _assemble(
+                source, get_arm("c2kv4"), benchmark=benchmark))
     except (KeyError, TypeError, ValueError, RuntimeError) as error:
         raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
     assembled, counts = _pin_memory_runtime_output(assembled, counts)
@@ -629,11 +639,13 @@ def _prepare_exact_memory_input(messages, eval_context, tools):
 
 
 def _prepare_actor_evidence_input(messages, eval_context, tools):
-    assembled, counts = _assemble(messages, get_arm("full"))
+    benchmark = eval_context.get("benchmark", "") if isinstance(eval_context, dict) else ""
+    assembled, counts = _assemble(messages, get_arm("full"), benchmark=benchmark)
     try:
         assembled, counts, prepared = MEMORY_RUNTIME.prepare_actor(
             messages, assembled, counts, eval_context, tools,
-            render_compressed=lambda source: _assemble(source, get_arm("c2kv4")))
+            render_compressed=lambda source: _assemble(
+                source, get_arm("c2kv4"), benchmark=benchmark))
     except (KeyError, TypeError, ValueError, RuntimeError) as error:
         raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
     assembled, counts = _pin_memory_runtime_output(assembled, counts)
@@ -1215,6 +1227,14 @@ def conversation_id(messages: List[Dict[str, Any]]) -> str:
     return _digest([head] + nonsystem)
 
 
+def history_conversation_id(messages, eval_context):
+    """Use the benchmark's task identity across all persistent-KV turns."""
+    task_id = eval_context.get("task_id") if isinstance(eval_context, dict) else None
+    if isinstance(task_id, str) and task_id:
+        return _digest({"task_id": task_id, "attempt": eval_context.get("attempt", 0)})
+    return conversation_id(messages)
+
+
 def action_canonical(message: Dict[str, Any]) -> Dict[str, Any]:
     """Canonical form of a RESPONSE message: tool calls (sorted keys) + text."""
     return {
@@ -1312,7 +1332,8 @@ def _stringify_content(message: Dict[str, Any]) -> str:
 
 
 def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
-              doc_packing=None, subgoal_session_id="subgoal-renderer"):
+              doc_packing=None, subgoal_session_id="subgoal-renderer",
+              benchmark: str = ""):
     """Return (out_messages, counts).
 
     ``counts`` carries the message-class breakdown (system/hybrid-tail/
@@ -1350,6 +1371,11 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
     if not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
     cutoff = _history_cutoff(messages)
+    task_packet_source_index = next(
+        (index for index, message in enumerate(messages)
+         if message.get("role") == "user"),
+        None,
+    ) if benchmark == "acon_appworld" else None
     out: List[Dict[str, Any]] = []
     gist_tokens = 0
     original_tokens = 0
@@ -1359,6 +1385,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
     compressed_records: List[Dict[str, Any]] = []
     track_fragments = bool(getattr(MEMORY_RUNTIME, "always_compress", False)) and arm.compress_history
     packing_fragments = []
+    task_packet_out_index = None
     packing = (doc_packing or DOC_PACKING) if arm.compress_history else "message"
     if packing not in {"message", "turn", "subgoal"}:
         raise ValueError(f"Unsupported document packing: {packing}")
@@ -1388,11 +1415,13 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
             not arm.compress_history
             or not (i < cutoff)
             or role == "system"
+            or i == task_packet_source_index
             or i in pending_sources
             or bool(arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
         )
 
     def _emit_raw(i: int, message: Dict[str, Any]) -> None:
+        nonlocal task_packet_out_index
         role = message.get("role") or "user"
         raw = dict(message)
         # training-dialect rendering applies to RAW assistant tool_calls
@@ -1402,6 +1431,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
         if role == "assistant" and message.get("tool_calls"):
             raw["content"] = _render_action_dialect(message)
             raw.pop("tool_calls", None)
+        if i == task_packet_source_index:
+            task_packet_out_index = len(out)
         out.append(raw)
         if role == "system":
             message_counts["system_raw"] += 1
@@ -1564,6 +1595,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
         counts["subgoal_organization"] = subgoal_ledger.metadata()
     counts["n_docs"] = n_docs
     counts["dropped_docs"] = dropped_docs
+    counts["task_packet_source_index"] = task_packet_source_index
+    counts["task_packet_out_index"] = task_packet_out_index
     counts["history_packed_original_tokens"] = history_packed_original_tokens
     counts["history_dropped_original_tokens"] = history_dropped_original_tokens
     counts["history_packed_candidate_doc_count"] = history_packed_candidate_doc_count
@@ -1611,9 +1644,12 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
     system_parts: List[str] = []
     history_indices: List[int] = []
     indexed: List[Tuple[int, Dict[str, Any]]] = []
+    task_packet_out_index = counts.get("task_packet_out_index")
     for index, message in enumerate(out_messages[:cutoff]):
         if (message.get("role") or "user") == "system":
             system_parts.append(str(message.get("content") or ""))
+            continue
+        if index == task_packet_out_index:
             continue
         item = _normalize_history_message(message)
         if item is None:
@@ -1629,6 +1665,7 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
         "system_text": "\n".join(part for part in system_parts if part),
         "history_text": history_text,
         "history_out_indices": history_indices,
+        "history_start_message_count": min(history_indices, default=cutoff),
         "history_message_count": cutoff,
         "current_start_out_index": cutoff,
         "n_history_messages": len(history_indices),
@@ -1656,9 +1693,12 @@ def _kv_reuse_context(out_messages: List[Dict[str, Any]],
     system_parts: List[str] = []
     history_indices: List[int] = []
     indexed: List[Tuple[int, Dict[str, Any]]] = []
+    task_packet_out_index = counts.get("task_packet_out_index")
     for index, message in enumerate(out_messages[:cutoff]):
         if (message.get("role") or "user") == "system":
             system_parts.append(str(message.get("content") or ""))
+            continue
+        if index == task_packet_out_index:
             continue
         item = _normalize_history_message(message)
         if item is None:
@@ -1707,7 +1747,8 @@ def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
 
 
 def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
-                    retrieve_subgoals: Optional[List[int]] = None
+                    retrieve_subgoals: Optional[List[int]] = None,
+                    preserve_task_packet: bool = False
                     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Rewrite history per the arm's text policy (textarms.py) BEFORE
     assembly; the arm is full-mode downstream.  Compressor calls go
@@ -1745,7 +1786,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         guideline = parts[2] if len(parts) > 2 else "base"
         out, stats = textarms.acon_transform(
             messages, compress, _render_action_dialect, conv,
-            mode=mode, model=model, guideline=guideline)
+            mode=mode, model=model, guideline=guideline,
+            preserve_task_packet=preserve_task_packet)
     stats["compressor_usage"] = usage_acc
     staged = dict(payload)
     staged["messages"] = out
@@ -1755,6 +1797,50 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
                for tool in tools):
             raise ValueError("benchmark tool name collides with HiAgent's internal retrieval tool")
         staged["tools"] = tools + [textarms.hiagent_retrieval_tool()]
+    return staged, stats
+
+
+def _apply_history_method(payload: Dict[str, Any], arm: Arm, conv: str
+                          ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Apply one append-only multi-turn baseline.
+
+    The compressor call is deliberately routed to the raw upstream endpoint,
+    just like the existing text baselines.  The per-conversation state is
+    persistent for the proxy lifetime and is never reconstructed from the
+    full transcript after the first request.
+    """
+    if not arm.history_method:
+        raise ValueError("_apply_history_method called for a non-method arm")
+    state = STATE.history_method_sessions.setdefault(
+        conv, history_methods.HistoryMethodState())
+    usage_acc = {"calls": 0, "prompt_tokens": 0,
+                 "completion_tokens": 0, "wall_sec": 0.0}
+
+    def compress(pl: Dict[str, Any]) -> str:
+        started = time.perf_counter()
+        with textarm_phase("compressor"):
+            data = _post_json("/v1/chat/completions", pl, 600)
+        usage = data.get("usage") or {}
+        usage_acc["calls"] += 1
+        usage_acc["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+        usage_acc["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+        usage_acc["wall_sec"] += time.perf_counter() - started
+        choice = (data.get("choices") or [{}])[0]
+        content = (choice.get("message") or {}).get("content") or ""
+        if choice.get("finish_reason") not in ("stop", "length") or not str(content).strip():
+            raise history_methods.TextarmCompressorError(
+                f"{arm.history_method} compressor failed: finish_reason="
+                f"{choice.get('finish_reason')!r}")
+        return str(content)
+
+    model = payload.get("model") or "qwen3-4b"
+    out, stats = history_methods.transform(
+        payload.get("messages") or [], state, arm.history_method, compress,
+        _render_action_dialect, model=str(model),
+        model_family=MODEL_FAMILY or model)
+    stats["compressor_usage"] = usage_acc
+    staged = dict(payload)
+    staged["messages"] = out
     return staged, stats
 
 
@@ -1967,6 +2053,9 @@ class ProxyState:
         # conversation_id -> server streaming-session id (physical-eviction
         # history-KV arms only)
         self.history_sessions: Dict[str, str] = {}
+        # append-only multi-turn method state, keyed by explicit task identity
+        # when available and by the legacy conversation digest otherwise
+        self.history_method_sessions: Dict[str, history_methods.HistoryMethodState] = {}
         self.gold_choices = {}
         self.gold_plans = {}
 
@@ -1984,10 +2073,9 @@ def _history_session_id(conv: str) -> str:
     closes it at the end; a stateless HTTP proxy has no end-of-conversation
     signal, so:
 
-    * the id is keyed by ``proxy.conversation_id``, which by construction
-      SHIFTS ONCE after a conversation grows past its first message (see
-      conversation_id) — such a conversation opens two sessions, the second
-      starting from an empty prefix;
+    * benchmark requests use explicit task/attempt identity. Requests without
+      that metadata retain the legacy content-derived key, which can shift
+      after the first message; they are not the multi-turn delivery contract;
     * sessions are never closed, so they live until the server restarts.
 
     Both limitations are documented in README "History-KV eviction arms".
@@ -2227,7 +2315,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         messages = payload.get("messages") or []
         proposal_policy = getattr(MEMORY_RUNTIME, "typed_subgoal_proposal_policy", None)
         fingerprint = messages_fingerprint(messages)
-        conv = conversation_id(messages)
+        conv = (history_conversation_id(messages, self.eval_context)
+                if (getattr(ARM, "history_kv", None)
+                    or getattr(ARM, "history_method", None))
+                else conversation_id(messages))
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
         original_payload = payload
@@ -2247,8 +2338,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     raise MemoryRuntimeError(
                         "memory runtime cannot be combined with client controls: "
                         + ", ".join(runtime_payload_conflicts))
-            if getattr(ARM, "text_policy", None):
-                payload, text_stats = _apply_text_arm(payload, ARM, conv)
+            if getattr(ARM, "history_method", None):
+                payload, text_stats = _apply_history_method(payload, ARM, conv)
+                messages = payload["messages"]
+            elif getattr(ARM, "text_policy", None):
+                if self.eval_context.get("benchmark") == "acon_appworld":
+                    payload, text_stats = _apply_text_arm(
+                        payload, ARM, conv, preserve_task_packet=True)
+                else:
+                    payload, text_stats = _apply_text_arm(payload, ARM, conv)
                 messages = payload["messages"]
             if getattr(MEMORY_RUNTIME, "supports_actor_evidence", False):
                 self.generation_records = []
@@ -2291,7 +2389,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind",
-                           "textarm_error" if ARM.text_policy else "assemble_error")
+                           "textarm_error" if (ARM.text_policy or ARM.history_method)
+                           else "assemble_error")
             generation_budget = self._finalize_generation_budget()
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
@@ -2415,7 +2514,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     def send_retrieved(staged):
                         nonlocal payload, messages_out
                         payload = staged
-                        messages_out, _ = _assemble(staged["messages"], ARM)
+                        messages_out, _ = _assemble(
+                            staged["messages"], ARM,
+                            benchmark=self.eval_context.get("benchmark", ""))
                         return send_upstream(messages_out, None)[0]
                     data = _hiagent_retrieval_loop(
                         original_payload, ARM, conv, data, text_stats, send_retrieved)
@@ -2532,7 +2633,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if recover_now:
                 repair_t0 = time.perf_counter()
                 try:
-                    raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
+                    raw_out, _ = _assemble(
+                        messages, FULL_ASSEMBLY,
+                        benchmark=self.eval_context.get("benchmark", ""))
                     data_b, normalized_b = call_upstream(raw_out, None)
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
@@ -2810,6 +2913,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
+            if ARM is not None and ARM.history_method:
+                row["history_method"] = counts["textarm"]
         # backend cost block (hfserver: cache/logical/prompt/system_len;
         # sglang: kv_resident/kv_peak/kv_pool) + repair columns
         cost = (normalized or {}).get("cost") or {}
@@ -2825,6 +2930,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, MEMORY_RUNTIME, UPSTREAM, REQUEST_LOG_PATH
+    global BENCHMARK, MODEL_FAMILY
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     global WITNESS_TOKENIZER_PATH
     global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
@@ -2851,6 +2957,10 @@ def main(argv=None):
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
                         choices=["hfserver", "sglang"])
+    parser.add_argument("--benchmark", default="",
+                        help="benchmark adapter namespace; AppWorld reserves its first user task packet")
+    parser.add_argument("--model-family", default="",
+                        help="model family contract; multi-turn baselines require qwen3-4b")
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
@@ -2880,6 +2990,13 @@ def main(argv=None):
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
+    BENCHMARK = args.benchmark
+    MODEL_FAMILY = args.model_family or ""
+    if ARM.history_method:
+        if not MODEL_FAMILY:
+            raise SystemExit(
+                "FATAL: multi-turn history arms require --model-family qwen3-4b")
+        history_methods.require_model_family(MODEL_FAMILY)
     MEMORY_RUNTIME = None
     MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = None
     MEMORY_RUNTIME_FATAL_ERROR = None

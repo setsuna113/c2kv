@@ -114,6 +114,12 @@ class SingleTaskHarnessAPI(EventNativeAPI):
         if identity is None:
             user_turn = max(0, sum(message.get("role") == "user"
                                    for message in messages if isinstance(message, Mapping)) - 1)
+            if (self.benchmark == "acon_appworld"
+                    and hasattr(getattr(self.runner, "controller", None), "gp")):
+                # AppWorld user-role messages after the task prompt are execution
+                # observations, not new user requests. L=user_turn follows this
+                # source contract while step still advances on every decision.
+                user_turn = 0
             identity = {"benchmark": self.benchmark,
                         "task_id": next(iter(self.allowed_task_ids)),
                         "user_turn": user_turn, "step": len(self._wire_identities), "attempt": 0}

@@ -79,12 +79,23 @@ def _controller(*, budget=1_000_000):
     )
 
 
-def _payload(messages, key="d1"):
+def _payload(messages, key="d1", tools=None):
     return {
         "session_id": "native-s0/session",
         "decision_key": key,
         "messages": copy.deepcopy(messages),
-        "tools": [],
+        "tools": copy.deepcopy(tools or []),
+    }
+
+
+def _tool_schema(name, description=""):
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": {}},
+        },
     }
 
 
@@ -288,6 +299,98 @@ def test_no_eligible_history_has_empty_pre_extraction_and_idempotent_api() -> No
     )
     with pytest.raises(PolicyInputError, match="reused with different input"):
         controller.prepare(changed, ratio=4, max_new_tokens=8)
+
+
+def test_append_only_tool_reveal_preserves_session_and_recomputes_prefix() -> None:
+    controller = _controller()
+    lookup = _tool_schema("lookup")
+    set_budget = _tool_schema("set_budget_limit")
+    first_messages = [{"role": "user", "content": "Inspect the budget."}]
+    first = controller.prepare(
+        _payload(first_messages, tools=[lookup]), ratio=4, max_new_tokens=8
+    )
+    controller.reconsider(first, [], draft_text="The setter is unavailable.")
+
+    second_messages = [
+        *first_messages,
+        {"role": "assistant", "content": "The setter is unavailable."},
+        {"role": "user", "content": "A new tool is now available."},
+    ]
+    second = controller.prepare(
+        _payload(second_messages, key="d2", tools=[lookup, set_budget]),
+        ratio=4,
+        max_new_tokens=8,
+    )
+    result = controller.reconsider(
+        second, [], draft_text="I can set the budget now."
+    )
+
+    assert second.metadata["decision_index"] == 2
+    assert len(second.memory.system_input_ids) > len(first.memory.system_input_ids)
+    assert controller._sessions["native-s0/session"].message_json[:1] == (
+        json.dumps(first_messages[0], ensure_ascii=False, allow_nan=False),
+    )
+    assert result["decision"]["status"] == "no_op"
+
+    with pytest.raises(PolicyInputError, match="reused with different input"):
+        controller.prepare(
+            _payload(
+                second_messages,
+                key="d2",
+                tools=[lookup, set_budget, _tool_schema("newer")],
+            ),
+            ratio=4,
+            max_new_tokens=8,
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_tools",
+    [
+        [_tool_schema("lookup")],
+        [_tool_schema("set_budget_limit"), _tool_schema("lookup")],
+        [
+            _tool_schema("lookup", "rewritten"),
+            _tool_schema("set_budget_limit"),
+        ],
+    ],
+)
+def test_tool_catalog_rejects_removal_reordering_and_rewrite(changed_tools) -> None:
+    controller = _controller()
+    initial = [_tool_schema("lookup"), _tool_schema("set_budget_limit")]
+    controller.prepare(
+        _payload([{"role": "user", "content": "Start."}], tools=initial),
+        ratio=4,
+        max_new_tokens=8,
+    )
+    with pytest.raises(PolicyInputError, match="only append-only"):
+        controller.prepare(
+            _payload(
+                [
+                    {"role": "user", "content": "Start."},
+                    {"role": "assistant", "content": "Continuing."},
+                    {"role": "user", "content": "Next."},
+                ],
+                key="d2",
+                tools=changed_tools,
+            ),
+            ratio=4,
+            max_new_tokens=8,
+        )
+
+
+def test_tool_catalog_extension_still_rejects_duplicate_names() -> None:
+    controller = _controller()
+    lookup = _tool_schema("lookup")
+    with pytest.raises(PolicyInputError, match="unique tool names"):
+        controller.prepare(
+            _payload(
+                [{"role": "user", "content": "Start."}],
+                tools=[lookup, copy.deepcopy(lookup)],
+            ),
+            ratio=4,
+            max_new_tokens=8,
+        )
 
 
 def test_constructor_enforces_frozen_geometry_and_s0_policy_shape() -> None:

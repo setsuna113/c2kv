@@ -21,6 +21,7 @@ from .bfcl_overlap_admission import (
 SUPPORTED_SESSION_CACHE_POLICIES = frozenset({
     'last-final-view-v1',
     'last-final-view-memo-only-v1',
+    'external-sglang-content-addressed-chunks-v1',
 })
 
 

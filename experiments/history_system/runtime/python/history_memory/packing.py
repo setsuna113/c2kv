@@ -11,6 +11,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
+from .encoding_scope import (
+    event_record_spans,
+    plan_encoding_scope,
+    record_common_spans,
+    structural_tool_result_record_spans,
+    validate_encoding_scope,
+)
 from .events import EventStore, Message
 
 PACKING_VERSION = "history-event-v1"
@@ -19,6 +26,10 @@ RAW_LAYOUT_PROFILE = "event-native-evidence-v1"
 
 class PackingBudgetError(ValueError):
     """The complete representation cannot fit; no content was truncated."""
+
+
+class EncodingScopeCapacityError(PackingBudgetError):
+    """One atomic encoder unit exceeds the declared model/extractor capacity."""
 
 
 @dataclass(frozen=True)
@@ -205,6 +216,382 @@ def encode_event_chunks(
     return tuple(chunks)
 
 
+def encode_scope_chunks(
+    store: EventStore,
+    event_ids: Iterable[str],
+    tokenizer: Any,
+    *,
+    encoding_scope: str,
+    max_chunk_tokens: int = 768,
+    chunk_overlap: int = 64,
+    atomic_unit_token_limit: int | None = None,
+    event_groups: Sequence[Sequence[str]] | None = None,
+) -> tuple[EncoderChunk, ...]:
+    """Tokenize the actual encoder calls for one G scope.
+
+    ``current`` and source-bound fallbacks retain the frozen overlapping chunk
+    behavior. Other scopes make exactly one chunk per atomic unit. Such units
+    are never split; callers must provide the actual model/extractor limit
+    when it is known.
+    """
+
+    scope = validate_encoding_scope(encoding_scope)
+    selected = tuple(event_ids)
+    selected_set = set(selected)
+    if scope == "current":
+        return tuple(
+            chunk
+            for event in store.events
+            if event.event_id in selected_set
+            for chunk in encode_event_chunks(
+                store,
+                event.event_id,
+                tokenizer,
+                max_chunk_tokens=max_chunk_tokens,
+                chunk_overlap=chunk_overlap,
+            )
+        )
+    if atomic_unit_token_limit is not None and (
+        isinstance(atomic_unit_token_limit, bool)
+        or not isinstance(atomic_unit_token_limit, int)
+        or atomic_unit_token_limit <= 0
+    ):
+        raise ValueError("atomic_unit_token_limit must be a positive integer or None")
+
+    if event_groups is None:
+        plan = plan_encoding_scope(store, selected, scope)
+        groups = plan.event_groups
+        if plan.pending_event_ids:
+            raise ValueError(
+                "Pending encoding-scope events must remain raw: "
+                f"{plan.pending_event_ids!r}"
+            )
+    else:
+        groups = _validate_scope_groups(store, selected, event_groups, scope)
+
+    chunks = []
+    for group in groups:
+        if (
+            scope in {"record_bound", "record_bound_structural"}
+            and not (
+                structural_tool_result_record_spans(store, group[0])
+                if scope == "record_bound_structural"
+                else event_record_spans(store, group[0])
+            )
+        ):
+            chunks.extend(
+                encode_event_chunks(
+                    store,
+                    group[0],
+                    tokenizer,
+                    max_chunk_tokens=max_chunk_tokens,
+                    chunk_overlap=chunk_overlap,
+                )
+            )
+            continue
+        for unit_id, source_indices, messages in _atomic_encoder_units(
+            store, group, scope
+        ):
+            ids = native_ids(tokenizer, messages)
+            if atomic_unit_token_limit is not None and len(ids) > atomic_unit_token_limit:
+                raise EncodingScopeCapacityError(
+                    f"Atomic {scope} encoder unit {unit_id!r} needs {len(ids)} tokens; "
+                    f"model/extractor capacity is {atomic_unit_token_limit}"
+                )
+            chunks.append(
+                EncoderChunk(
+                    unit_id,
+                    0,
+                    source_indices,
+                    0,
+                    len(ids),
+                    ids,
+                )
+            )
+    return tuple(chunks)
+
+
+def _validate_scope_groups(store, event_ids, event_groups, scope):
+    selected = set(event_ids)
+    groups = tuple(tuple(group) for group in event_groups)
+    flattened = tuple(event_id for group in groups for event_id in group)
+    if len(flattened) != len(set(flattened)) or set(flattened) != selected:
+        raise ValueError("encoding event groups must cover selected events exactly once")
+    expected_size = 2 if scope == "adjacent_pair" else 1
+    if any(len(group) != expected_size for group in groups):
+        raise ValueError(f"{scope} encoding groups must contain {expected_size} event(s)")
+    expected = plan_encoding_scope(store, flattened, scope).event_groups
+    if groups != expected:
+        raise ValueError("encoding event groups must follow visible source order")
+    return groups
+
+
+def _atomic_encoder_units(store, group, scope):
+    if scope == "event":
+        event_id = group[0]
+        event = store.event(event_id)
+        return ((event_id, event.source_indices, event_encoder_messages(store, event_id)),)
+    if scope == "adjacent_pair":
+        events = [store.event(event_id) for event_id in group]
+        envelope = {
+            "type": "history_event_pair",
+            "events": [
+                {
+                    "kind": event.kind,
+                    "messages": [
+                        visible_message(message)
+                        for message in store.event_messages(event.event_id)
+                    ],
+                }
+                for event in events
+            ],
+        }
+        unit_id = (
+            f"{store.session_id}:pair:"
+            f"{min(events[0].source_indices)}-{min(events[1].source_indices)}"
+        )
+        source_indices = tuple(
+            index for event in events for index in event.source_indices
+        )
+        messages = ({
+            "role": "user",
+            "content": json.dumps(
+                envelope,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
+        },)
+        return ((unit_id, source_indices, messages),)
+    if scope in {"record_bound", "record_bound_structural"}:
+        event_id = group[0]
+        records = (
+            structural_tool_result_record_spans(store, event_id)
+            if scope == "record_bound_structural"
+            else event_record_spans(store, event_id)
+        )
+        return _bound_record_encoder_units(store, event_id, records, scope)
+    if scope != "record":
+        raise ValueError(f"Unsupported atomic encoding scope: {scope!r}")
+
+    event_id = group[0]
+    event = store.event(event_id)
+    structural = []
+    for source_index in event.source_indices:
+        message = visible_message(store.messages[source_index])
+        if message.get("tool_calls"):
+            structural.append((source_index, _tool_call_context(message)))
+    units = []
+    for record_index, record in enumerate(event_record_spans(store, event_id)):
+        record_message = visible_message(store.messages[record.source_index])
+        span = record.span
+        if record.container_path == ("content",):
+            if record_message.get("tool_calls"):
+                record_message = _tool_call_context(record_message)
+            record_message["content"] = span.text
+        else:
+            call_index = record.container_path[1]
+            arguments = span.text
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                pass
+            record_message = _tool_call_context(record_message)
+            selected_context = record_message["tool_calls"][call_index]
+            selected_context["function"]["arguments"] = arguments
+            record_message["tool_calls"] = [selected_context]
+            record_message["content"] = None
+        messages = [
+            message for index, message in structural if index != record.source_index
+        ]
+        messages.append(record_message)
+        field_path = (*record.container_path, *span.field_path)
+        envelope = {
+            "type": "history_record",
+            "kind": event.kind,
+            "field_path": list(field_path),
+            "messages": messages,
+        }
+        sibling_context = _record_sibling_context(store, record)
+        if sibling_context:
+            envelope["sibling_context"] = sibling_context
+        path = "/".join(
+            str(part).replace("~", "~0").replace("/", "~1")
+            for part in field_path
+        )
+        unit_id = (
+            f"{event_id}:record:{record.source_index}:"
+            f"{path or 'root'}:{record_index}"
+        )
+        provenance = tuple(
+            dict.fromkeys([*(index for index, _ in structural), record.source_index])
+        )
+        units.append((
+            unit_id,
+            provenance,
+            ({
+                "role": "user",
+                "content": json.dumps(
+                    envelope,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ),
+            },),
+        ))
+    return tuple(units)
+
+
+def _bound_record_encoder_units(store, event_id, records, scope):
+    """Build source-only record inputs with exact producer and parent binding."""
+
+    units = []
+    for record_index, record in enumerate(records):
+        source = store.messages[record.source_index].to_dict()
+        field_path = (*record.container_path, *record.span.field_path)
+        source_header = {
+            key: source[key]
+            for key in ("role", "name", "tool_call_id")
+            if key in source
+        }
+        binding = {
+            "message_header": source_header,
+            "path": list(field_path),
+        }
+        producer = _original_producer_call(store, event_id, record)
+        provenance = [record.source_index]
+        if producer is not None:
+            producer_index, producer_call = producer
+            binding["producer_call"] = producer_call
+            provenance.insert(0, producer_index)
+
+        common_header = []
+        container_text = _record_container_text(source, record.container_path)
+        for common in record_common_spans(container_text, record.span):
+            common_header.append(
+                {
+                    "path": [*record.container_path, *common.field_path],
+                    "text": common.text,
+                }
+            )
+        if common_header:
+            binding["common_header"] = common_header
+
+        envelope = {
+            "type": "history_record_bound",
+            "binding": binding,
+            "record_text": record.span.text,
+        }
+        path = "/".join(
+            str(part).replace("~", "~0").replace("/", "~1")
+            for part in field_path
+        )
+        unit_id = (
+            f"{event_id}:{scope}:{record.source_index}:"
+            f"{path or 'root'}:{record_index}"
+        )
+        units.append(
+            (
+                unit_id,
+                tuple(dict.fromkeys(provenance)),
+                ({
+                    "role": "user",
+                    "content": json.dumps(
+                        envelope,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ),
+                },),
+            )
+        )
+    return tuple(units)
+
+
+def _record_container_text(source, container_path):
+    value = source
+    for part in container_path:
+        value = value[part]
+    if not isinstance(value, str):
+        raise ValueError("Record container is no longer an exact source string")
+    return value
+
+
+def _original_producer_call(store, event_id, record):
+    source = store.messages[record.source_index].to_dict()
+    if (
+        len(record.container_path) >= 2
+        and record.container_path[0] == "tool_calls"
+        and isinstance(record.container_path[1], int)
+    ):
+        calls = source.get("tool_calls")
+        call_index = record.container_path[1]
+        if isinstance(calls, list) and 0 <= call_index < len(calls):
+            call = calls[call_index]
+            if isinstance(call, dict):
+                return record.source_index, call
+        return None
+
+    call_id = source.get("tool_call_id")
+    if source.get("role") != "tool" or not isinstance(call_id, str):
+        return None
+    for source_index in store.event(event_id).source_indices:
+        message = store.messages[source_index].to_dict()
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list):
+            continue
+        for call in calls:
+            if isinstance(call, dict) and call.get("id") == call_id:
+                return source_index, call
+    return None
+
+
+def _tool_call_context(message):
+    context = {
+        key: value
+        for key, value in message.items()
+        if key not in {"content", "tool_calls"}
+    }
+    context["content"] = None
+    context["tool_calls"] = [
+        {
+            "id": call["id"],
+            "type": call.get("type", "function"),
+            "function": {"name": call["function"]["name"]},
+        }
+        for call in message["tool_calls"]
+    ]
+    return context
+
+
+def _record_sibling_context(store, record):
+    span_path = record.span.field_path
+    if (
+        len(span_path) != 2
+        or not isinstance(span_path[0], str)
+        or not isinstance(span_path[1], int)
+    ):
+        return None
+    message = store.messages[record.source_index].to_dict()
+    value = message
+    for part in record.container_path:
+        value = value[part]
+    try:
+        parent = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(parent, dict):
+        return None
+    record_fields = {
+        key
+        for key, child in parent.items()
+        if isinstance(child, list)
+        and child
+        and all(isinstance(item, dict) for item in child)
+    }
+    return {key: child for key, child in parent.items() if key not in record_fields}
+
+
 @dataclass(frozen=True)
 class GistPlacement:
     chunk: EncoderChunk
@@ -271,6 +658,9 @@ def pack_memory(
     max_chunk_tokens: int = 768, chunk_overlap: int = 64, max_chunks: int | None = None,
     max_raw_tokens: int | None = None,
     derived_workspace_prefix_messages: Sequence[Mapping[str, Any]] = (),
+    encoding_scope: str = "current",
+    atomic_unit_token_limit: int | None = None,
+    encoding_event_groups: Sequence[Sequence[str]] | None = None,
 ) -> PackedMemory:
     """Pack all selected content or raise; no first-plus-tail selection occurs.
 
@@ -281,9 +671,26 @@ def pack_memory(
     inserts gist KV between this prefix and the exact workspace.
     """
     view.validate(store)
-    chunks = tuple(
-        chunk for event in store.events if event.event_id in view.gist_event_ids
-        for chunk in encode_event_chunks(store, event.event_id, tokenizer, max_chunk_tokens=max_chunk_tokens, chunk_overlap=chunk_overlap)
+    scope = validate_encoding_scope(encoding_scope)
+    selected_gist = set(view.gist_event_ids)
+    selected_groups = (
+        None
+        if encoding_event_groups is None
+        else tuple(
+            tuple(event_id for event_id in group)
+            for group in encoding_event_groups
+            if set(group) <= selected_gist
+        )
+    )
+    chunks = encode_scope_chunks(
+        store,
+        view.gist_event_ids,
+        tokenizer,
+        encoding_scope=scope,
+        max_chunk_tokens=max_chunk_tokens,
+        chunk_overlap=chunk_overlap,
+        atomic_unit_token_limit=atomic_unit_token_limit,
+        event_groups=selected_groups,
     )
     if max_chunks is not None and len(chunks) > max_chunks:
         raise PackingBudgetError(f"Complete events need {len(chunks)} chunks; budget is {max_chunks}")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .attempt_journal import AttemptJournal, summarize_attempt_journal
 from .event_native import inspect_checkpoint, load_generator, validate_inference_byte_profile
@@ -22,6 +24,9 @@ from .event_native_eval_policy import load_eval_policy, resolve_event_native_eva
 from .event_native_eval_packing import resolve_eval_packing
 from .event_native_step import EventNativeDecisionRunner
 from .event_native_costs import read_event_native_steps, summarize_event_native_steps
+
+
+GENERATION_BACKENDS = ('native', 'sglang')
 
 
 def positive_int(value):
@@ -81,6 +86,12 @@ def parser():
                         help='Required explicit controller configuration for the native S0 route.')
     result.add_argument('--shadow-feature-config', type=Path,
                         help='Explicit optional generation-feature capture configuration.')
+    result.add_argument('--generation-backend', choices=GENERATION_BACKENDS, default='native',
+                        help='Generation implementation. D3/G--P controllers require sglang.')
+    result.add_argument('--sglang-backend-url',
+                        help='Bare SGLang engine base URL, for example http://127.0.0.1:36100.')
+    result.add_argument('--sglang-timeout-seconds', type=positive_seconds, default=10800.0,
+                        help='Per-request timeout for the external SGLang engine.')
     result.add_argument('--max-wall-seconds', type=positive_seconds, required=True)
     result.add_argument('--device', default='cpu')
     result.add_argument('--no-raw-snapshot', action='store_true',
@@ -109,7 +120,175 @@ def _validate_allocator_device(args):
         raise ValueError('NPU allocator metrics require an npu device')
 
 
+def _read_s0_configuration(args):
+    path = getattr(args, 's0_config', None)
+    if path is None:
+        return None, None
+    config_bytes = path.read_bytes()
+    config = json.loads(config_bytes)
+    if not isinstance(config, dict):
+        raise ValueError('s0-config must contain a JSON object')
+    return config, {
+        'config': config,
+        'source': str(path.resolve()),
+        'sha256': hashlib.sha256(config_bytes).hexdigest(),
+    }
+
+
+def _controller_requires_sglang(config):
+    return isinstance(config, dict) and (
+        'post_draft_recovery' in config or 'gp_experiments' in config
+    )
+
+
+def _normalize_sglang_url(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('SGLang generation requires --sglang-backend-url')
+    value = value.strip()
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != 'http'
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ('', '/')
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError('sglang-backend-url must be a bare HTTP base URL')
+    return value.rstrip('/')
+
+
+def _validate_generation_backend(args, *, s0_config=None):
+    backend = getattr(args, 'generation_backend', 'native')
+    if backend not in GENERATION_BACKENDS:
+        raise ValueError(f'Unsupported generation backend: {backend!r}')
+    requires_sglang = _controller_requires_sglang(s0_config)
+    if requires_sglang and backend != 'sglang':
+        raise ValueError('D3 post_draft_recovery and G--P require generation-backend=sglang')
+    url = getattr(args, 'sglang_backend_url', None)
+    if backend == 'sglang':
+        args.sglang_backend_url = _normalize_sglang_url(url)
+        if getattr(args, 'decode_strategy', 'incremental') != 'incremental':
+            raise ValueError('SGLang generation requires decode-strategy=incremental')
+        if getattr(args, 'npu_allocator_metrics', False):
+            raise ValueError(
+                'Process-local NPU allocator metrics cannot measure the external SGLang engine'
+            )
+        if getattr(args, 'device', 'cpu') != 'cpu':
+            raise ValueError('SGLang controller process requires device=cpu')
+        if getattr(args, 'max_extraction_calls', None) is None:
+            raise ValueError('SGLang generation requires an explicit max-extraction-calls cap')
+    elif url is not None:
+        raise ValueError('sglang-backend-url requires generation-backend=sglang')
+    return backend
+
+
+def _shadow_feature_configuration(args, tokenizer):
+    if getattr(args, 'shadow_feature_config', None) is None:
+        return None, None
+    from history_memory.shadow_features import ShadowFeatureConfig
+    feature_bytes = args.shadow_feature_config.read_bytes()
+    feature_config = json.loads(feature_bytes)
+    allowed = {'enabled', 'prefill_layer', 'memgen_layer'}
+    if not isinstance(feature_config, dict) or set(feature_config) - allowed:
+        raise ValueError('Unsupported shadow feature configuration fields')
+    tokenizer_path = args.checkpoint / 'tokenizer.json'
+    tokenizer_binding = hashlib.sha256(tokenizer_path.read_bytes()).hexdigest()
+    shadow = ShadowFeatureConfig(
+        **feature_config,
+        decode_token_ids=lambda ids: tokenizer.decode(
+            list(ids), skip_special_tokens=False, clean_up_tokenization_spaces=False),
+        model_binding=str(args.checkpoint.resolve()),
+        tokenizer_binding=tokenizer_binding,
+    )
+    contract = {
+        'config': feature_config,
+        'config_sha256': hashlib.sha256(feature_bytes).hexdigest(),
+        'checkpoint': str(args.checkpoint.resolve()),
+        'tokenizer_sha256': tokenizer_binding,
+        'protocol_special_tokens_preserved': True,
+    }
+    return shadow, contract
+
+
+def _validate_eos_token_ids(value, *, source):
+    values = (value,) if type(value) is int else tuple(value or ())
+    if not values or any(type(item) is not int or item < 0 for item in values):
+        raise ValueError(f'{source} must declare valid eos_token_id values')
+    return values
+
+
+def _checkpoint_eos_token_ids(checkpoint, tokenizer):
+    generation_path = checkpoint / 'generation_config.json'
+    if generation_path.is_file():
+        generation_config = json.loads(generation_path.read_text(encoding='utf-8'))
+        if not isinstance(generation_config, dict):
+            raise ValueError('checkpoint generation_config.json must contain an object')
+        source = 'checkpoint_generation_config.eos_token_id'
+        return _validate_eos_token_ids(
+            generation_config.get('eos_token_id'), source=source
+        ), source
+    source = 'checkpoint_tokenizer.eos_token_id'
+    return _validate_eos_token_ids(tokenizer.eos_token_id, source=source), source
+
+
+def _build_generator(
+    args,
+    *,
+    profile,
+    model_context,
+    tokenizer,
+    journal_path,
+    s0_config,
+    shadow_feature_config,
+):
+    backend = args.generation_backend
+    if backend == 'native':
+        generator, loaded_profile = load_generator(
+            args.checkpoint,
+            device=args.device,
+            dtype=args.dtype,
+            retain_raw_snapshot=not getattr(args, 'no_raw_snapshot', False),
+            decode_strategy=args.decode_strategy,
+            **(
+                {'prefill_chunk_size': args.prefill_chunk_size}
+                if getattr(args, 'prefill_chunk_size', None) is not None else {}
+            ),
+            **(
+                {'max_extraction_calls': args.max_extraction_calls}
+                if getattr(args, 'max_extraction_calls', None) is not None else {}
+            ),
+        )
+        if shadow_feature_config is not None:
+            generator.configure_shadow_features(shadow_feature_config)
+        return generator, loaded_profile
+
+    from history_memory.sglang_generator import SGLangEventNativeGenerator
+    gp = s0_config.get('gp_experiments') if isinstance(s0_config, dict) else None
+    encoding_scope = gp.get('G', 'current') if isinstance(gp, dict) else 'current'
+    eos_token_ids, eos_source = _checkpoint_eos_token_ids(args.checkpoint, tokenizer)
+    generator = SGLangEventNativeGenerator(
+        args.sglang_backend_url,
+        expected_model_path=args.checkpoint.resolve(),
+        model_context=model_context,
+        max_new_tokens=args.max_new_tokens,
+        max_generation_calls=args.max_generation_calls,
+        max_extraction_calls=args.max_extraction_calls,
+        timeout_seconds=args.sglang_timeout_seconds,
+        eos_token_ids=eos_token_ids,
+        eos_source=eos_source,
+        journal_path=journal_path.with_name('sglang_http.jsonl'),
+        sampling_params={'temperature': 0.0, 'seed': 0},
+        shadow_feature_config=shadow_feature_config,
+        encoding_scope=encoding_scope,
+    )
+    return generator, profile
+
+
 def _serve(args):
+    s0_config, s0_contract = _read_s0_configuration(args)
+    generation_backend = _validate_generation_backend(args, s0_config=s0_config)
     _validate_allocator_device(args)
     started = time.monotonic()
     deadline = started + args.max_wall_seconds
@@ -151,9 +330,17 @@ def _serve(args):
         'decode_strategy': args.decode_strategy,
         'max_decisions': args.max_decisions, 'max_generation_calls': args.max_generation_calls,
         'max_wall_seconds': args.max_wall_seconds, 'device': args.device, 'dtype': args.dtype,
+        'generation_backend': generation_backend,
+        'sglang_backend_url': (
+            args.sglang_backend_url if generation_backend == 'sglang' else None
+        ),
         'sampling': {'mode': 'greedy', 'temperature': 0, 'seed': 0},
         'attempt_journal': str(journal_path.resolve()),
-        'scope': 'Final native assistant transport; tools and scoring remain in the external official harness.',
+        'sglang_http_journal': (
+            str(journal_path.with_name('sglang_http.jsonl').resolve())
+            if generation_backend == 'sglang' else None
+        ),
+        'scope': 'Final event-native assistant transport; tools and scoring remain in the external official harness.',
     }
     save_json(args.out / 'startup.json', manifest)
     server = api = generator = None
@@ -181,9 +368,6 @@ def _serve(args):
         runtime_packing = resolve_eval_packing(profile, getattr(args, 'eval_capacity', None))
         manifest['runtime_packing_contract'] = runtime_packing
         save_json(args.out / 'startup.json', manifest)
-        import torch
-        if args.device.split(':', 1)[0] == 'npu':
-            import torch_npu  # Register the explicitly selected optional device backend.
         from transformers import AutoTokenizer
         from .event_native_api import EventNativeAPI, make_server
         controller_factory = build_event_native_controller
@@ -201,60 +385,53 @@ def _serve(args):
             runner_type, api_type = AceEventNativeDecisionRunner, AceEventNativeAPI
             manifest['source_protocol_contract'] = describe_ace_source_contract()
             source_kwargs['source_protocol_contract'] = manifest['source_protocol_contract']
-        torch.set_num_threads(args.torch_threads)
+        if generation_backend == 'native':
+            import torch
+            if args.device.split(':', 1)[0] == 'npu':
+                import torch_npu  # Register the explicitly selected optional device backend.
+            torch.set_num_threads(args.torch_threads)
         tokenizer = AutoTokenizer.from_pretrained(str(args.checkpoint), local_files_only=True)
         s0_kwargs = {}
-        if getattr(args, 's0_config', None) is not None:
+        if s0_config is not None:
             from .event_native_always import NATIVE_S0_MODE
             if args.view_mode != NATIVE_S0_MODE:
                 raise ValueError('s0-config requires the native S0 route')
-            import hashlib
-            config_bytes = args.s0_config.read_bytes()
-            s0_kwargs['s0_config'] = json.loads(config_bytes)
-            manifest['s0_controller_contract'] = {'config': s0_kwargs['s0_config'],
-                'source':str(args.s0_config.resolve()),
-                'sha256':hashlib.sha256(config_bytes).hexdigest()}
+            s0_kwargs['s0_config'] = s0_config
+            manifest['s0_controller_contract'] = s0_contract
         controller = controller_factory(tokenizer, packing=runtime_packing['effective_packing'],
             policy=runtime_policy['effective_policy'], view_mode=args.view_mode, model_context=context,
+            **({'benchmark': args.benchmark}
+               if source_profile != 'acebench-text-actions-v1' else {}),
             **s0_kwargs,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
                if source_profile in ('native-v1', 'openai-single-task-v1') else {}))
-        generator, profile = load_generator(args.checkpoint, device=args.device, dtype=args.dtype,
-                                            retain_raw_snapshot=not getattr(args, 'no_raw_snapshot', False),
-                                            decode_strategy=args.decode_strategy,
-                                            **({"prefill_chunk_size": args.prefill_chunk_size}
-                                               if getattr(args, "prefill_chunk_size", None) is not None else {}),
-                                            **({"max_extraction_calls": args.max_extraction_calls}
-                                               if getattr(args, "max_extraction_calls", None) is not None else {}))
-        if getattr(args, 'shadow_feature_config', None) is not None:
-            import hashlib
-            from history_memory.shadow_features import ShadowFeatureConfig
-            feature_bytes = args.shadow_feature_config.read_bytes()
-            feature_config = json.loads(feature_bytes)
-            allowed = {'enabled', 'prefill_layer', 'memgen_layer'}
-            if not isinstance(feature_config, dict) or set(feature_config) - allowed:
-                raise ValueError('Unsupported shadow feature configuration fields')
-            tokenizer_path = args.checkpoint / 'tokenizer.json'
-            tokenizer_binding = hashlib.sha256(tokenizer_path.read_bytes()).hexdigest()
-            generator.configure_shadow_features(ShadowFeatureConfig(
-                **feature_config,
-                decode_token_ids=lambda ids: tokenizer.decode(
-                    list(ids), skip_special_tokens=False, clean_up_tokenization_spaces=False),
-                model_binding=str(args.checkpoint.resolve()),
-                tokenizer_binding=tokenizer_binding,
-            ))
-            manifest['shadow_feature_contract'] = {
-                'config': feature_config,
-                'config_sha256': hashlib.sha256(feature_bytes).hexdigest(),
-                'checkpoint': str(args.checkpoint.resolve()),
-                'tokenizer_sha256': tokenizer_binding,
-                'protocol_special_tokens_preserved': True,
-            }
+        shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
+        generator, profile = _build_generator(
+            args,
+            profile=profile,
+            model_context=context,
+            tokenizer=tokenizer,
+            journal_path=journal_path,
+            s0_config=s0_config,
+            shadow_feature_config=shadow_feature_config,
+        )
+        if shadow_contract is not None:
+            manifest['shadow_feature_contract'] = shadow_contract
         if getattr(args, 'npu_allocator_metrics', False):
             from .event_native_allocator import NpuAllocatorMeasuredGenerator
             generator = NpuAllocatorMeasuredGenerator(generator)
             manifest['allocator_measurement'] = generator.measurement_contract
+        elif generation_backend == 'sglang':
+            manifest['allocator_measurement'] = {
+                'status': 'not_measured',
+                'scope': 'external_sglang_engine',
+                'reason': 'Process-local allocator counters do not cover the remote engine.',
+            }
+            manifest['backend_accounting'] = {
+                'source': 'sglang_native_generation_response',
+                'scope': 'exact encoded/reused chunks and logical KV bytes reported by the engine',
+            }
         manifest['session_cache_policy'] = generator.session_cache_policy
         if generator.kv_bytes_per_token() != expected_bytes:
             raise ValueError('loaded KV geometry differs from the declared budget')
@@ -347,6 +524,7 @@ def _child_command(args):
         '--max-decisions', str(args.max_decisions),
         '--max-generation-calls', str(args.max_generation_calls),
         '--max-wall-seconds', str(args.max_wall_seconds),
+        '--generation-backend', getattr(args, 'generation_backend', 'native'),
         '--device', args.device,
         '--dtype', args.dtype,
         '--host', args.host,
@@ -371,6 +549,11 @@ def _child_command(args):
         command.extend(['--s0-config', str(args.s0_config.resolve())])
     if getattr(args, 'shadow_feature_config', None) is not None:
         command.extend(['--shadow-feature-config', str(args.shadow_feature_config.resolve())])
+    if getattr(args, 'generation_backend', 'native') == 'sglang':
+        command.extend([
+            '--sglang-backend-url', args.sglang_backend_url,
+            '--sglang-timeout-seconds', str(args.sglang_timeout_seconds),
+        ])
     if getattr(args, 'no_raw_snapshot', False):
         command.append('--no-raw-snapshot')
     if getattr(args, 'npu_allocator_metrics', False):
@@ -388,6 +571,8 @@ def _hard_stop_owned_child(process):
 
 
 def _supervise(args, *, command=None):
+    s0_config, _ = _read_s0_configuration(args)
+    _validate_generation_backend(args, s0_config=s0_config)
     _validate_allocator_device(args)
     started = time.monotonic()
     out = args.out.resolve()

@@ -172,7 +172,11 @@ def main():
         "ratio":args.ratio, "checkpoint_selection":selected_checkpoint,
         "runtime": {"controller":controller_path, "eval_policy":policy_path, "eval_capacity":capacity_path,
             **feature_runtime,
-            **{key:current["runtime"][key] for key in ("server_module", "official_worker_module", "device", "dtype", "bfcl_python", "npu_allocator_metrics")}},
+            **{key:current["runtime"][key] for key in (
+                "server_module", "official_worker_module", "generation_backend",
+                "sglang_backend_url", "sglang_timeout_seconds", "device", "dtype",
+                "bfcl_python", "npu_allocator_metrics",
+            )}},
         "resolved_configs": {"controller":controller, "eval_policy":policy, "eval_capacity":capacity},
         "source_files": {p.relative_to(runtime).as_posix():sha(p) for p in runtime.rglob("*") if p.is_file()},
         "task_and_scorer_lineage": {"bfcl_root_default":args.bfcl_root_default,

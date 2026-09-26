@@ -54,6 +54,7 @@ REPAIR_PLACEMENTS = ("append_keep_ledger", "append_tail", "in_place")
 # (scheduler._build_history_kv_eviction_rounds, qwen3.generate_raw_repair_kv).
 HISTORY_KV_METHODS = ("streamingllm", "h2o", "snapkv_persistent", "pyramidkv")
 HISTORY_KV_METHOD_ALIASES = {"snapkv": "snapkv_persistent", "pyramid": "pyramidkv"}
+MULTITURN_HISTORY_METHODS = ("agentfold", "commitkv", "agentkv")
 # ``--runtime-history-kv-backend`` in the upstream runner.
 HISTORY_KV_BACKENDS = ("repair_extract", "physical_eviction")
 HISTORY_KV_POOLINGS = ("avgpool", "maxpool")
@@ -237,6 +238,10 @@ class Arm:
     # model as policy — the papers' own protocol). Variant names keep
     # HiAgent retrieval and ACON guideline stages explicit.
     text_policy: Optional[str] = None
+    # Stateful multi-turn history baselines.  These use the append-only
+    # event protocol in history_methods.py and are restricted to Qwen3-4B.
+    history_method: Optional[str] = None
+    required_model_family: Optional[str] = None
     # Capabilities supplied by benchmark/proxy plumbing rather than by the
     # model endpoint itself. A matrix preflight must reject an arm when one
     # of these markers is absent.
@@ -275,13 +280,14 @@ class Arm:
         if self.gold_recovery and (not self.compress_history or self.repair or self.recover):
             raise ValueError("gold recovery requires plain gist compression")
         if self.history_kv:
-            if self.compress_history or self.text_policy or self.repair or self.recover:
+            if (self.compress_history or self.text_policy or self.history_method
+                    or self.repair or self.recover):
                 raise ValueError(
                     f"arm {self.name!r}: history_kv is exclusive with gist "
                     "compression, text_policy, repair and recover")
             history_kv_spec(self)
         if self.kv_reuse:
-            if (self.compress_history or self.text_policy or self.repair
+            if (self.compress_history or self.text_policy or self.history_method or self.repair
                     or self.recover or self.history_kv):
                 raise ValueError(
                     f"arm {self.name!r}: kv_reuse is exclusive with gist "
@@ -295,6 +301,20 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: repair and recover are mutually exclusive")
         if self.text_policy and self.compress_history:
             raise ValueError(f"arm {self.name!r}: text_policy and KV compression are exclusive")
+        if self.history_method:
+            if self.history_method not in MULTITURN_HISTORY_METHODS:
+                raise ValueError(
+                    f"arm {self.name!r}: unknown history_method {self.history_method!r}; "
+                    f"expected one of {MULTITURN_HISTORY_METHODS}")
+            if self.compress_history or self.text_policy or self.repair or self.recover or self.kv_reuse:
+                raise ValueError(
+                    f"arm {self.name!r}: history_method is exclusive with other history controls")
+            if self.required_model_family != "qwen3-4b":
+                raise ValueError(
+                    f"arm {self.name!r}: multi-turn history methods require required_model_family='qwen3-4b'")
+        elif self.required_model_family is not None:
+            raise ValueError(
+                f"arm {self.name!r}: required_model_family needs history_method")
         text_policies = {
             "hiagent", "hiagent_summary", "hiagent_full",
             "acon_hist", "acon_obs",
@@ -332,6 +352,37 @@ ARMS: Dict[str, Arm] = {
         Arm(
             name="full_native", compress_history=False, native_messages=True,
             description="Uncompressed original model with native chat messages and tool-call history",
+        ),
+        Arm(
+            name="agentfold",
+            compress_history=False,
+            history_method="agentfold",
+            required_model_family="qwen3-4b",
+            description=(
+                "AgentFold-compatible append-only multi-turn folding baseline: "
+                "newly closed turns are folded at granular/deep levels; "
+                "requires Qwen3-4B and does not expose retrospective recovery"
+            ),
+        ),
+        Arm(
+            name="commitkv",
+            compress_history=False,
+            history_method="commitkv",
+            required_model_family="qwen3-4b",
+            description=(
+                "CommitKV-compatible lifecycle baseline: only committed "
+                "action-observation events are retired; pending events stay raw"
+            ),
+        ),
+        Arm(
+            name="agentkv",
+            compress_history=False,
+            history_method="agentkv",
+            required_model_family="qwen3-4b",
+            description=(
+                "AgentKV-compatible append-only memory baseline with at most "
+                "one explicit retrospective event recovery per conversation"
+            ),
         ),
         Arm(
             name="c2kv4", compress_history=True, ratio=4,
@@ -550,6 +601,15 @@ ARMS: Dict[str, Arm] = {
             description="PyramidKV history-KV eviction at retention 0.312; the "
                         "per-layer funnel budget is realised as a layer-union keep "
                         "set on one shared page table (server-side globalisation)",
+        ),
+        Arm(
+            name="history_kv_pyramidkv",
+            compress_history=False,
+            history_kv={"method": "pyramidkv", "retention_ratio": 0.312},
+            description=(
+                "PyramidKV baseline alias for experiment 1; the same server-side "
+                "per-layer funnel policy used as an experiment 2 unit"
+            ),
         ),
         # KNOWN CONFOUND on both cd_* arms: constrain_tools=True makes the
         # sglang backend rewrite request.tools with _inline_refs ($refs
