@@ -470,6 +470,22 @@ def test_ace_anchored_t0_response_uses_physical_prefix_in_cost_summary(tmp_path)
     assert stats["system_prefix_kv_tokens"] == 444
     assert stats["resident_prefix_kv_tokens"] == 597
     assert stats["resident_prefix_kv_bytes"] == 88031232
+    assert "native_serving_execution" not in stats
+    assert "native_raw_prefix_cache" not in stats
+    response["serving_execution"] = {
+        "mode": "selected-first-response-barrier-v1",
+        "response_barrier": "generation_and_extras"}
+    response["sglang_runtime"] = {"c2kv_raw_prefix_cache": {
+        "enabled": True, "status": "hit", "hit_tokens": 413,
+        "inserted_tokens": 0, "prefix_tokens": 413, "reason": None}}
+    annotated = generator._result_from_response(
+        response, payload=payload, memory=memory, selected=selected,
+        extras=extras, ratio=8, requested_tokens=4, request_index=1,
+        http_status=200, wall_seconds=0.1, scope=None, effective_eos_ids=(0,),
+    )
+    assert annotated.token_ids == generation.token_ids
+    assert annotated.stats["native_serving_execution"] == response["serving_execution"]
+    assert annotated.stats["native_raw_prefix_cache"] == response["sglang_runtime"]["c2kv_raw_prefix_cache"]
     trace = {"phase": "draft", "status": "completed", "discarded": False,
              "attempt_uid": "ace-native-1", "attempt_index": 1,
              "generation": {"stats": stats}}

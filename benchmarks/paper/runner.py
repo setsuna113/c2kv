@@ -888,6 +888,24 @@ def _unsupported_stage(stage, cell):
     return None
 
 
+def paper_env(config, source):
+    """Environment shared by a cell's engine and its benchmark children."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(source / "python"), str(ROOT.parent), env.get("PYTHONPATH", "")])
+    env["BENCH_BFCL_DIR"] = config["bfcl_dir"]
+    env["APPWORLD_ROOT"] = config["appworld_root"]
+    env["C2KV_PAPER_TELEMETRY"] = "1"
+    # Experimental serving features are selected by the frozen serving config,
+    # never inherited accidentally by a normal paper run.
+    env["C2KV_NATIVE_RAW_PREFIX_CACHE"] = "0"
+    env["C2KV_NATIVE_BACKGROUND_EXTRAS"] = "0"
+    env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "0"
+    env.setdefault("CUDA_HOME", "/opt/cuda")
+    env["PATH"] = (str(Path(config["server_python"]).parent) + os.pathsep
+                   + env.get("PATH", ""))
+    return env
+
+
 def execute(config, plan, output, source, stages, selected, port_offset=0):
     _, unknown = _selected_plan(plan, selected)
     if any(is_subset(cell) for cell in plan):
@@ -897,15 +915,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             raise ValueError("Task subsets require --stage closed_loop")
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(source / "python"), str(ROOT.parent), env.get("PYTHONPATH", "")])
-    env["BENCH_BFCL_DIR"] = config["bfcl_dir"]
-    env["APPWORLD_ROOT"] = config["appworld_root"]
-    env["C2KV_PAPER_TELEMETRY"] = "1"
-    env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "0"
-    env.setdefault("CUDA_HOME", "/opt/cuda")
-    env["PATH"] = (str(Path(config["server_python"]).parent) + os.pathsep
-                   + env.get("PATH", ""))
+    env = paper_env(config, source)
     for stage in stages:
         for cell in plan:
             if selected and cell["cell_id"] not in selected:
@@ -1154,9 +1164,10 @@ def aggregate_results(config, plan, output, stages, selected):
 @unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore"])
+    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore", "serve"])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
+    parser.add_argument("--sglang-source", type=Path,
+                        help="engine checkout (required for serve; otherwise defaults to sibling sglang-paper)")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
@@ -1206,8 +1217,36 @@ def main(argv=None):
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     parser.add_argument("--generation-timeout", type=float,
                         help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
+    parser.add_argument("--workers", type=int,
+                        help="serve only: concurrent single-task children sharing one engine")
+    parser.add_argument("--serve-tasks", default="",
+                        help="serve only: comma-separated official task IDs (default: the whole split)")
+    parser.add_argument("--native-raw-prefix-cache", action="store_true",
+                        help="prepare/serve: opt in to native C2KV first raw-prefix caching")
+    parser.add_argument("--background-extras", action="store_true",
+                        help="prepare/serve: overlap recovery extras with draft generation, joining before response")
     args = parser.parse_args(argv)
+    if args.action == "serve":
+        if args.sglang_source is None:
+            parser.error("serve requires an explicit --sglang-source with concurrent telemetry support")
+        if args.workers is None or args.workers < 1:
+            parser.error("serve requires --workers >= 1")
+        if args.stage == "common_prefix":
+            parser.error("serve runs closed-loop tasks")
+        if len(set(filter(None, args.cells.split(",")))) != 1:
+            parser.error("serve takes exactly one --cells id")
+    elif args.workers is not None or args.serve_tasks:
+        parser.error("--workers and --serve-tasks apply only to serve")
     config = json.loads(args.config.read_text())
+    for selected, key in ((args.native_raw_prefix_cache, "serving_native_raw_prefix_cache"),
+                          (args.background_extras, "serving_background_extras")):
+        if selected:
+            if args.action not in {"prepare", "serve"}:
+                parser.error("Native serving feature flags apply only to prepare/serve")
+            config[key] = True
+    if args.action == "run" and any(config.get(key, False) for key in (
+            "serving_native_raw_prefix_cache", "serving_background_extras")):
+        parser.error("This config enables serving optimizations; use serve instead of run")
     if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
                                      or args.stage == "common_prefix"):
         parser.error("rescore scores explicit closed-loop --cells of an existing output root")
@@ -1241,7 +1280,7 @@ def main(argv=None):
         if args.action == "run" and "task_subsets" in config and args.stage != "closed_loop":
             parser.error("Task subsets require --stage closed_loop")
     output = args.output or Path(config["output_root"])
-    source = args.sglang_source.resolve()
+    source = (args.sglang_source or ROOT.parent.parent / "sglang-paper").resolve()
     if args.action in {"aggregate", "rescore"}:
         config = json.loads((output / "config.resolved.json").read_text())
         plan = json.loads((output / "commands.json").read_text())
@@ -1254,6 +1293,20 @@ def main(argv=None):
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),
                 port_offset=args.port_offset)
+    elif args.action == "serve":
+        from .c1 import selected_tasks
+        from .serving import serve_cell
+        (cell_id,) = set(filter(None, args.cells.split(",")))
+        cell = next((row for row in plan if row["cell_id"] == cell_id), None)
+        if cell is None:
+            parser.error(f"Unknown cell {cell_id!r}")
+        tasks = selected_tasks(config, cell["benchmark"],
+                               args.serve_tasks.split(",") if args.serve_tasks else None)
+        manifest = serve_cell(config, cell, output, source, output / "deployment_profile.json",
+                              workers=args.workers, tasks=tasks, port_offset=args.port_offset)
+        print(json.dumps({key: manifest[key] for key in
+                          ("cell_id", "workers", "n_tasks", "n_scored", "total_runtime_seconds",
+                           "tasks_per_hour", "successful_tasks_per_hour", "status")}, indent=2))
     elif args.action == "rescore":
         from .rescore import rescore_cells
         receipts = rescore_cells(plan, output, set(filter(None, args.cells.split(","))))

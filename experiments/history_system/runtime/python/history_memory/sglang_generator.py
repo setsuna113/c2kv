@@ -1404,6 +1404,13 @@ class SGLangEventNativeGenerator:
         }
         if shadow is not None:
             stats["shadow_features"] = shadow
+        execution = response.get("serving_execution")
+        if execution is not None:
+            stats["native_serving_execution"] = _json_object(execution, "response.serving_execution")
+        runtime = response.get("sglang_runtime")
+        if isinstance(runtime, Mapping) and runtime.get("c2kv_raw_prefix_cache") is not None:
+            stats["native_raw_prefix_cache"] = _json_object(
+                runtime["c2kv_raw_prefix_cache"], "response.sglang_runtime.c2kv_raw_prefix_cache")
         return SGLangEventNativeGenerationResult(
             token_ids=output_ids,
             finish_reason=finish_reason,
