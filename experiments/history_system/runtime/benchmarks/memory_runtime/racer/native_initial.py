@@ -15,6 +15,7 @@ from history_memory.source_packing import make_source_view
 from ..adapter import raw_source_cutoff
 from ..event_native_s0_policy import EventNativeS0Controller, _Measurement
 from ..event_native_raw import RuntimeMemoryView
+from ..backend_capacity import current_constraints
 from .allocator import PersistentMemory
 
 
@@ -55,11 +56,16 @@ def _native_input_layout(tokenizer, source, tools):
 class NativeInitialRepresentation:
     """Only packing and its cost/coverage contract differ from the policy base."""
 
+    # Ratio changes and projected raw messages require complete source gists.
+    # A residual native pool cannot supply those representations.
+    supports_gist_capacity_fallback = False
+
     def _boundary(self, store, tools):
         boundary = super()._boundary(store, tools)
         # A native pool has no complete-source compact representation. Required
         # producer/current inputs must therefore pass exact native admission.
-        boundary["mandatory"] = set(boundary["required"])
+        if not getattr(self, "allow_native_history_demotion", False):
+            boundary["mandatory"] = set(boundary["required"])
         return boundary
 
     def _prepare_view(self, *args, **kwargs):
@@ -85,7 +91,8 @@ class NativeInitialRepresentation:
             "selection_and_protection_policy_reused": True,
             "representation": "exact_native_sources_plus_backend_residual_pool",
             "compact_sources_are_complete_representations": False,
-            "required_sources_use_exact_native_admission": True,
+            "required_sources_use_exact_native_admission": not getattr(
+                self, "allow_native_history_demotion", False),
             "source_indices": list(memory.native_evidence_source_indices),
             "event_ids": list(memory.native_evidence_event_ids),
             "initial_s0_source_indices": list(memory.initial_s0_source_indices),
@@ -100,6 +107,25 @@ class NativeInitialRepresentation:
         metadata["atomic_packing_unit"] = "native_exact_source"
         metadata["min_gist_reservation_required"] = False
         metadata["min_gist_reservation_met"] = None
+        allocation = metadata.get("source_allocation")
+        if allocation is not None:
+            allocation["representation_unit"] = "exact_source_or_unprotected_native_history"
+            allocation["unprotected_history_source_indices"] = allocation.pop(
+                "gist_source_indices", allocation.get("unprotected_history_source_indices", []))
+            allocation["required_source_indices"] = allocation.pop(
+                "required_represented_source_indices", allocation.get("required_source_indices", []))
+            allocation["complete_source_coverage_guaranteed"] = False
+            metadata["unprotected_history_source_indices"] = allocation["unprotected_history_source_indices"]
+            metadata.pop("gist_source_indices", None)
+        constraints = current_constraints(metadata["session_id"], metadata["decision_key"])
+        if constraints is not None:
+            metadata["backend_capacity_constraints"] = {
+                "stage": constraints.stage, "provenance": constraints.provenance,
+                "mandatory_history_tokens": constraints.mandatory_history_tokens,
+                "mandatory_source_indices": list(constraints.mandatory_source_indices),
+                "admitted_minimum_history_tokens": memory.retained_history_min_tokens,
+                "release": constraints.release,
+            }
         metadata["common_raw_prompt_tokens"] = memory.common_tokens
         metadata["actual_raw_history_tokens"] = memory.native_evidence_tokens
         metadata["actual_gist_tokens"] = 0
@@ -169,6 +195,11 @@ class NativeInitialRepresentation:
         extra = len(ids) - len(original)
         budget = self.backend_config.history_budget_tokens
         minimum = 1 if full_history else 0
+        constraints = current_constraints(store.session_id)
+        if constraints is not None:
+            if constraints.history_budget_tokens != budget:
+                raise ValueError("Backend constraint budget differs from the configured history budget")
+            minimum = max(minimum, constraints.minimum_history_tokens(admitted))
         remaining = budget - extra
         retained = min(full_history, max(0, remaining))
         reasons = []
@@ -258,3 +289,14 @@ class NativeInitialFactory:
         initial.backend_config = self.backend
         self.initial = initial
         return initial
+
+    def compose(self, composer, tokenizer, **kwargs):
+        if self.initial is not None:
+            raise ValueError("RACER requires exactly one configured initial allocation controller")
+
+        def branch_factory(policy_type, branch_tokenizer, **branch_kwargs):
+            return NativeInitialFactory(self.backend)(policy_type, branch_tokenizer, **branch_kwargs)
+
+        root = composer(tokenizer, initial_allocator_factory=branch_factory, **kwargs)
+        self.initial = root
+        return root

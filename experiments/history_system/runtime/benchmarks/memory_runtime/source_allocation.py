@@ -10,7 +10,7 @@ import copy
 
 from history_memory.packing import PackingBudgetError, visible_message
 from history_memory.source_packing import (
-    encode_source_chunks, make_source_view, pack_source_memory,
+    SourceMemoryView, encode_source_chunks, make_source_view, pack_source_memory,
 )
 
 from .adapter import raw_source_cutoff
@@ -456,7 +456,8 @@ class SourceAllocatedS0Controller(SameEventBridgeOnlyS0Controller):
                 bridge.update(status="replaced_by_complete_event_raw",
                               source_result_present_in_raw_workspace=True,
                               incremental_raw_tokens=0, extra_bytes=0)
-        if candidate is None and not derived_messages and not goal_view:
+        if (candidate is None and not derived_messages and not goal_view
+                and isinstance(prepared.memory.view, SourceMemoryView)):
             measure = self.measure_source_view(prepared, store, tools, ratio=ratio,
                                                max_new_tokens=max_new, derived_messages=derived)
             if measure is None or measure.reasons:
@@ -473,7 +474,13 @@ class SourceAllocatedS0Controller(SameEventBridgeOnlyS0Controller):
                    "complete_event_raw_required": candidate is not None, "allocation": allocation}
         if measure is None:
             return None, None, receipt
-        metadata = self._metadata(store, tools, measure, allocation, boundary, prepared.eligible_chunks,
+        chunks = prepared.eligible_chunks
+        if not isinstance(prepared.memory.view, type(measure.memory.view)):
+            # Event-based incumbent chunks are not source-message encoder units.
+            chunks = encode_source_chunks(store, sorted(boundary["eligible_sources"]), self.tokenizer,
+                max_chunk_tokens=self.packing.max_chunk_tokens,
+                chunk_overlap=self.packing.chunk_overlap)
+        metadata = self._metadata(store, tools, measure, allocation, boundary, chunks,
             ratio, max_new, prepared.metadata["decision_key"], prepared.metadata["decision_index"], derived)
         for key in ("candidate_algorithm", "route", "same_event_reference", "failed_operation_cue",
                     "post_draft_recovery_config"):

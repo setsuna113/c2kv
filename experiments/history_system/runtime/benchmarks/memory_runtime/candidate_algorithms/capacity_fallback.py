@@ -72,7 +72,7 @@ class CapacityFallbackAllocator:
             )
         except CapacityInfeasible as error:
             initial_error = error
-            if ratio != 8:
+            if ratio != 8 or not getattr(self._base, "supports_gist_capacity_fallback", True):
                 raise
 
         assert initial_error is not None
@@ -445,6 +445,7 @@ def build_capacity_fallback_allocator(
     s0_config,
     benchmark,
     terminal_tool_rescue=False,
+    initial_allocator_factory=None,
 ):
     """Build the actual configured S0 controller, then add the fallback."""
 
@@ -459,6 +460,7 @@ def build_capacity_fallback_allocator(
         compression_policy=ALWAYS_COMPRESSION_POLICY,
         s0_config=s0_config,
         benchmark=benchmark,
+        initial_allocator_factory=initial_allocator_factory,
     )
     if terminal_tool_rescue:
         from .tool_event_rescue import ToolEventRescueAllocator

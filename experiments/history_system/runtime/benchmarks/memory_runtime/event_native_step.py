@@ -5,11 +5,13 @@ import copy
 import hashlib
 import json
 import time
+from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any
 
 from .attempt_journal import AttemptJournal
 from .always_compress import CapacityInfeasible
+from .backend_capacity import capacity_scope, current_constraints
 from .event_native import memory_to_dict
 from .event_native_draft import NATIVE_DRAFT_VERSION, decode_native_generation
 from .racer.capacity import HistoryCapacityInfeasible
@@ -99,11 +101,12 @@ class EventNativeDecisionRunner:
                 controller_payload = dict(payload)
                 controller_payload.pop('outer_request_id', None)
                 controller_payload.pop('recovery_disabled', None)
-                prepared = self.controller.prepare(
-                    controller_payload,
-                    ratio=self.ratio,
-                    max_new_tokens=self.max_new_tokens,
-                )
+                with self._capacity_scope(key, "draft"):
+                    prepared = self.controller.prepare(
+                        controller_payload,
+                        ratio=self.ratio,
+                        max_new_tokens=self.max_new_tokens,
+                    )
             finally:
                 duration_ns = time.perf_counter_ns() - prepare_started
                 record['controller_timing']['prepare_duration_ns'] = duration_ns
@@ -144,9 +147,10 @@ class EventNativeDecisionRunner:
                 else:
                     reconsider_started = time.perf_counter_ns()
                     try:
-                        reconsidered = self.controller.reconsider(
-                            prepared, list(draft.tool_calls), draft_text=draft.text,
-                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                        with self._capacity_scope(key, "regeneration"):
+                            reconsidered = self.controller.reconsider(
+                                prepared, list(draft.tool_calls), draft_text=draft.text,
+                                parse_error=draft.reason if draft.status == 'malformed' else None)
                     finally:
                         duration_ns = time.perf_counter_ns() - reconsider_started
                         record['controller_timing']['reconsider_duration_ns'] = duration_ns
@@ -212,9 +216,10 @@ class EventNativeDecisionRunner:
                     advance(prepared, shadow_features=(getattr(result, 'stats', {}) or {}).get('shadow_features'))
                     reconsider_started = time.perf_counter_ns()
                     try:
-                        reconsidered = self.controller.reconsider(
-                            prepared, list(draft.tool_calls), draft_text=draft.text,
-                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                        with self._capacity_scope(key, "regeneration"):
+                            reconsidered = self.controller.reconsider(
+                                prepared, list(draft.tool_calls), draft_text=draft.text,
+                                parse_error=draft.reason if draft.status == 'malformed' else None)
                         checks.append(copy.deepcopy(reconsidered['decision']))
                     finally:
                         duration_ns = time.perf_counter_ns() - reconsider_started
@@ -345,6 +350,15 @@ class EventNativeDecisionRunner:
     def close(self):
         """Release the generator's committed device and host session cache."""
         self.generator.close_session()
+
+    @contextmanager
+    def _capacity_scope(self, key, stage):
+        provider = getattr(self.generator, "backend_capacity_constraints", None)
+        constraints = provider(session_id=key[0], decision_key=key[1], stage=stage) if callable(provider) else None
+        scope = getattr(self.controller, "capacity_scope", capacity_scope)
+        with scope(constraints):
+            current_constraints(key[0], key[1], stage)
+            yield
 
     def _regeneration_capacity(self, memory):
         check = getattr(self.generator, 'regeneration_capacity', None)

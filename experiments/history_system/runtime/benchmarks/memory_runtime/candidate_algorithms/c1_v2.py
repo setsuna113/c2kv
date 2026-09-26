@@ -1,4 +1,4 @@
-"""Source allocation, T02 complete-event recovery, and frozen Verified commits."""
+"""Shared incumbent-first protection, capacity rescue, T02 and Verified."""
 from __future__ import annotations
 
 import copy
@@ -9,14 +9,17 @@ from .repair_protocol import RepairContext
 from .verified_binding import PROOF_REGISTRY_VERSION
 from .verified_commit import VerifiedCommitPolicy
 from ..policy import PolicyInputError
-from ..source_allocation import SOURCE_ALLOCATION_VERSION, SourceAllocatedS0Controller
+from .capacity_source_gate import POLICY_VERSION, CapacityGatedSourceAllocator
 
 
 def c1_v2_fields(variant):
     if variant not in C1_V2_VARIANTS:
         raise ValueError("Unknown C1 v2 variant")
     return {
-        "initial_view": {"policy": "source_budget_allocation", "version": SOURCE_ALLOCATION_VERSION},
+        "initial_view": {"policy": "s0_capacity_fallback", "version": "c2kv-s0-capacity-fallback-v1",
+                         "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
+                         "source_rescue": POLICY_VERSION,
+                         "source_rescue_trigger": "incumbent_c1_capacity_infeasible"},
         "recovery_backbone": "t02_complete_event", "completion_review": False,
         "proof_registry_version": PROOF_REGISTRY_VERSION,
     }
@@ -36,9 +39,9 @@ def validate_c1_v2_config(candidate):
 
 def build_c1_v2(tokenizer, *, candidate, packing, policy, model_context, s0_config, benchmark,
                 initial_allocator_factory=None):
-    from ..initial_factory import instantiate_initial
+    from ..initial_factory import instantiate_composed_initial
     validate_c1_v2_config(candidate)
-    base = instantiate_initial(SourceAllocatedS0Controller,
+    base = instantiate_composed_initial(CapacityGatedSourceAllocator,
         tokenizer, packing=packing, policy=policy, model_context=model_context,
         s0_config=s0_config, benchmark=benchmark,
         initial_allocator_factory=initial_allocator_factory)
