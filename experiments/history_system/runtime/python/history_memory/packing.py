@@ -19,6 +19,7 @@ from .encoding_scope import (
     validate_encoding_scope,
 )
 from .events import EventStore, Message
+from .token_cache import NativeTokenCache
 
 PACKING_VERSION = "history-event-v1"
 RAW_LAYOUT_PROFILE = "event-native-evidence-v1"
@@ -130,9 +131,39 @@ def visible_message(message: Message | Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def native_ids(tokenizer: Any, messages: Sequence[Mapping[str, Any]], *, tools=None, generation=False) -> tuple[int, ...]:
+def native_ids(tokenizer: Any, messages: Sequence[Mapping[str, Any]], *, tools=None,
+               generation=False, token_cache: NativeTokenCache | None = None) -> tuple[int, ...]:
     if not messages:
         raise ValueError("The native text template needs at least one message")
+    if token_cache is not None:
+        cached = token_cache.get(tokenizer, messages, tools=tools, generation=generation)
+        if cached is not None:
+            return cached
+        if token_cache.supports_prologue_split():
+            rendered = tokenizer.apply_chat_template(
+                list(messages), tools=tools, tokenize=False,
+                add_generation_prompt=generation, enable_thinking=False,
+                truncation=False,
+            )
+            prologue = _rendered_prologue(tokenizer, messages, tools, rendered)
+            if prologue is not None:
+                prefix_ids = token_cache.get_prologue(prologue)
+                if prefix_ids is None:
+                    prefix_ids = tuple(int(token) for token in tokenizer.encode(
+                        prologue, add_special_tokens=False, truncation=False))
+                    token_cache.put_prologue(prologue, prefix_ids)
+                suffix_ids = []
+                for segment in _rendered_segments(rendered[len(prologue):]):
+                    ids = token_cache.get_segment(segment)
+                    if ids is None:
+                        ids = tuple(int(token) for token in tokenizer.encode(
+                            segment, add_special_tokens=False, truncation=False))
+                        token_cache.put_segment(segment, ids)
+                    suffix_ids.extend(ids)
+                result = prefix_ids + tuple(suffix_ids)
+                token_cache.put(tokenizer, messages, result, tools=tools,
+                                generation=generation)
+                return result
     ids = tokenizer.apply_chat_template(
         list(messages), tools=tools, tokenize=True,
         add_generation_prompt=generation, enable_thinking=False,
@@ -140,7 +171,55 @@ def native_ids(tokenizer: Any, messages: Sequence[Mapping[str, Any]], *, tools=N
     )
     if hasattr(ids, "input_ids"):
         ids = ids.input_ids
-    return tuple(int(token) for token in ids)
+    result = tuple(int(token) for token in ids)
+    if token_cache is not None:
+        token_cache.put(tokenizer, messages, result, tools=tools, generation=generation)
+    return result
+
+
+def _rendered_segments(rendered: str) -> tuple[str, ...]:
+    """Split only before a verified special-token opener; retain the newline left."""
+    boundary = "\n<|im_start|>"
+    start = 0
+    parts = []
+    while (position := rendered.find(boundary, start)) >= 0:
+        cut = position + 1
+        parts.append(rendered[start:cut])
+        start = cut
+    parts.append(rendered[start:])
+    return tuple(parts)
+
+
+def _rendered_prologue(tokenizer: Any, messages: Sequence[Mapping[str, Any]],
+                       tools: Any, rendered: str) -> str | None:
+    """Prove the complete render starts with a closed system/tools message."""
+    if not isinstance(rendered, str):
+        return None
+    if messages[0]["role"] == "system":
+        probe = list(messages[:1])
+        trailer = ""
+    elif tools:
+        probe = [{"role": "user", "content": ""}]
+        trailer = "<|im_start|>user\n<|im_end|>\n"
+    else:
+        return None
+    try:
+        isolated = tokenizer.apply_chat_template(
+            probe, tools=tools, tokenize=False,
+            add_generation_prompt=False, enable_thinking=False,
+            truncation=False,
+        )
+    except Exception:
+        return None
+    if not isinstance(isolated, str) or not isolated.endswith(trailer):
+        return None
+    prologue = isolated[:-len(trailer)] if trailer else isolated
+    suffix = rendered[len(prologue):]
+    if (not prologue.endswith("<|im_end|>\n")
+            or not rendered.startswith(prologue)
+            or not suffix.startswith("<|im_start|>")):
+        return None
+    return prologue
 
 
 def event_encoder_messages(store: EventStore, event_id: str) -> tuple[dict[str, Any], ...]:
@@ -218,10 +297,11 @@ class EncoderChunk:
 def encode_event_chunks(
     store: EventStore, event_id: str, tokenizer: Any, *, max_chunk_tokens: int = 768,
     chunk_overlap: int = 64,
+    token_cache: NativeTokenCache | None = None,
 ) -> tuple[EncoderChunk, ...]:
     if max_chunk_tokens <= 0 or not 0 <= chunk_overlap < max_chunk_tokens:
         raise ValueError("Require max_chunk_tokens > chunk_overlap >= 0")
-    ids = native_ids(tokenizer, event_encoder_messages(store, event_id))
+    ids = native_ids(tokenizer, event_encoder_messages(store, event_id), token_cache=token_cache)
     chunks = []
     start = 0
     while start < len(ids):
@@ -243,6 +323,7 @@ def encode_scope_chunks(
     chunk_overlap: int = 64,
     atomic_unit_token_limit: int | None = None,
     event_groups: Sequence[Sequence[str]] | None = None,
+    token_cache: NativeTokenCache | None = None,
 ) -> tuple[EncoderChunk, ...]:
     """Tokenize the actual encoder calls for one G scope.
 
@@ -266,6 +347,7 @@ def encode_scope_chunks(
                 tokenizer,
                 max_chunk_tokens=max_chunk_tokens,
                 chunk_overlap=chunk_overlap,
+                token_cache=token_cache,
             )
         )
     if atomic_unit_token_limit is not None and (
@@ -303,13 +385,14 @@ def encode_scope_chunks(
                     tokenizer,
                     max_chunk_tokens=max_chunk_tokens,
                     chunk_overlap=chunk_overlap,
+                    token_cache=token_cache,
                 )
             )
             continue
         for unit_id, source_indices, messages in _atomic_encoder_units(
             store, group, scope
         ):
-            ids = native_ids(tokenizer, messages)
+            ids = native_ids(tokenizer, messages, token_cache=token_cache)
             if atomic_unit_token_limit is not None and len(ids) > atomic_unit_token_limit:
                 raise EncodingScopeCapacityError(
                     f"Atomic {scope} encoder unit {unit_id!r} needs {len(ids)} tokens; "
@@ -715,6 +798,7 @@ def pack_memory(
     atomic_unit_token_limit: int | None = None,
     encoding_event_groups: Sequence[Sequence[str]] | None = None,
     raw_source_message_overrides: Mapping[int, Mapping[str, Any]] | None = None,
+    token_cache: NativeTokenCache | None = None,
 ) -> PackedMemory:
     """Pack all selected content or raise; no first-plus-tail selection occurs.
 
@@ -745,6 +829,7 @@ def pack_memory(
         chunk_overlap=chunk_overlap,
         atomic_unit_token_limit=atomic_unit_token_limit,
         event_groups=selected_groups,
+        token_cache=token_cache,
     )
     if max_chunks is not None and len(chunks) > max_chunks:
         raise PackingBudgetError(f"Complete events need {len(chunks)} chunks; budget is {max_chunks}")
@@ -772,15 +857,17 @@ def pack_memory(
         while prefix_length < len(raw_messages) and raw_messages[prefix_length]["role"] == "system":
             prefix_length += 1
         raw_messages[prefix_length:prefix_length] = derived
-    full_ids = native_ids(tokenizer, raw_messages, tools=tools, generation=True)
+    full_ids = native_ids(tokenizer, raw_messages, tools=tools, generation=True,
+                          token_cache=token_cache)
     prefix_messages = []
     for message in raw_messages:
         if message["role"] != "system":
             break
         prefix_messages.append(message)
     dummy = {"role": "user", "content": ""}
-    dummy_ids = native_ids(tokenizer, [dummy])
-    prefix_and_dummy = native_ids(tokenizer, prefix_messages + [dummy], tools=tools)
+    dummy_ids = native_ids(tokenizer, [dummy], token_cache=token_cache)
+    prefix_and_dummy = native_ids(tokenizer, prefix_messages + [dummy], tools=tools,
+                                  token_cache=token_cache)
     if not dummy_ids or prefix_and_dummy[-len(dummy_ids):] != dummy_ids:
         raise ValueError("Native template does not support a separable system/tools prefix")
     prefix_ids = prefix_and_dummy[:-len(dummy_ids)]

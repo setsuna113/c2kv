@@ -1,21 +1,59 @@
 """Exercise the paper runner's owned process teardown without a model."""
 
 import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
 
+from benchmarks import run as bench_run
 from benchmarks.paper import runner
 from benchmarks.paper.process_lifecycle import (run_owned, stop_owned_group,
                                                 termination_unwinds)
 
 
 class ProcessLifecycleTest(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "Linux socket reuse behavior required")
+    def test_full_proxy_rebinds_lane_port_across_real_tasks(self):
+        class Health(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            upstream = HTTPServer(("127.0.0.1", 0), Health)
+            thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for task in range(3):
+                    task_dir = root / f"task_{task}"
+                    task_dir.mkdir()
+                    process, _ = bench_run.start_proxy(
+                        f"http://127.0.0.1:{upstream.server_port}", "full",
+                        port, task_dir, benchmark="bfcl", backend="sglang",
+                        shared_engine=True)
+                    self.assertIsNone(process.poll())
+                    bench_run._stop_process(process)
+                    self.assertIsNotNone(process.poll())
+            finally:
+                upstream.shutdown()
+                upstream.server_close()
+                thread.join(timeout=5)
+
     def test_run_owned_preserves_completed_process_contract(self):
         result = run_owned([sys.executable, "-c", "print('ready')"],
                            check=True, capture_output=True, text=True)

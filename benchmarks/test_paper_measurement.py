@@ -413,6 +413,42 @@ def test_shared_episode_closes_only_owned_session_without_global_flush(monkeypat
     assert state.history_sessions == {}
 
 
+def test_full_shared_engine_starts_and_resets_locally_without_flushing(monkeypatch):
+    class Backend:
+        name = "sglang"
+        supports_episode_reset = True
+
+        def __init__(self):
+            self.flushes = 0
+
+        def flush_cache(self, timeout):
+            self.flushes += 1
+
+    backend = Backend()
+    monkeypatch.setattr(proxy_mod, "get_backend", lambda name, post: backend)
+    monkeypatch.setattr(proxy_mod, "STATE", proxy_mod.ProxyState())
+    monkeypatch.setattr(proxy_mod, "CACHE", proxy_mod.ExtractCache())
+
+    class Server:
+        def __init__(self, address, handler):
+            pass
+
+        def serve_forever(self):
+            assert proxy_mod.ARM.name == "full" and proxy_mod.SHARED_ENGINE
+            proxy_mod._activate_measurement_session("task-1")
+            proxy_mod.CACHE.get_or_put(("local",), lambda: {"value": 1})
+            proxy_mod._activate_measurement_session("task-2")
+            assert proxy_mod.CACHE._cache == {}
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(proxy_mod, "ThreadingHTTPServer", Server)
+    proxy_mod.main(["--upstream", "http://127.0.0.1:1", "--backend", "sglang",
+                    "--arm", "full", "--port", "1", "--shared-engine"])
+    assert backend.flushes == 0
+
+
 def test_proxy_close_endpoint_resolves_measurement_id_to_owned_engine_id(monkeypatch):
     import threading
     from http.server import ThreadingHTTPServer

@@ -236,7 +236,12 @@ def test_worker_calls_existing_official_runner_with_frozen_contract(
         "generation_seed": 0,
         "generation_max_tokens": _ready()["max_new_tokens"],
     }
-    assert json.loads(summary_path.read_text(encoding="utf-8")) == {
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    timing = summary.pop("bfcl_worker_timing")
+    assert timing["schema"] == "bfcl-worker-timing-v1"
+    assert timing["initialization_duration_ns"] >= 0
+    assert timing["harness_duration_ns"] >= 0
+    assert summary == {
         "benchmark": "bfcl",
         "scored": True,
     }

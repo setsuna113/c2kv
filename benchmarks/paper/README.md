@@ -1131,8 +1131,8 @@ converted into an original-draft fallback.
 `raw` remains present when tool contexts are requested. Non-C2KV detector
 cells record `frozen_c2kv_unvalidated_transfer`; this labels an unvalidated
 calibration transfer and makes no new calibration claim. Source-repair
-policies and `off` use no learned detector. Persistent RACER execution requires
-`--disable-overlap-schedule`, `--disable-radix-cache`, and
+policies and `off` use no learned detector. The single-flight RACER `run`
+path uses `--disable-overlap-schedule`, `--disable-radix-cache`, and
 `--enable-streaming-session`; the runner supplies all three. CPU registry,
 composition, and transport tests are covered here. CUDA quality runs remain
 pending and are not implied by those checks.
@@ -1141,3 +1141,35 @@ To select tools from the latest completed semantic event, use
 `--tool-contexts t0_r8_hybrid3_schema_latest_event`. This context resolves to
 `t0:r8:hybrid3:schema:selector=latest_event_topk_v1`; source artifacts and
 selector identities are recorded separately from the history backend.
+
+## Concurrent v4 C2KV serving
+
+`serve` runs one BFCL cell on a shared engine. The accelerated native path
+accepts only `racer-backend-v4` C2KV cells; `full` is the control. Use a fresh
+output directory for each arm and the same explicit official task IDs. The
+config must set `history_kv_budget_tokens: 256` and retain the checkpoint,
+raw-tool, tokenizer, and benchmark settings. This command selects v4 C2KV
+with extra protection and lexical retrieval draft both on:
+
+```bash
+python -m benchmarks.paper serve --config CONFIG.json --sglang-source ENGINE \
+  --output OUTPUT_V4 --cells bfcl_long_context__racer_v4_c2kv_c1_v2_verified_protection_on_b256 \
+  --racer-backends c2kv --racer-policies c1_v2_verified \
+  --racer-schema v4 --racer-protection on --racer-retrieval-draft on \
+  --racer-history-budget 256 --workers 8 --serve-tasks TASK_IDS \
+  --native-raw-prefix-cache --background-extras --bulk-cache-lookup \
+  --cross-turn-prewarm --async-compression --persistent-runtime \
+  --dynamic-persistent-runtime --incremental-tokenization \
+  --overlap-schedule --engine-max-running-requests 8 \
+  --radix-eviction-policy lru
+```
+
+`TASK_IDS` is a comma-separated list of official BFCL IDs. For Full, select
+`bfcl_long_context__full` with a separate output directory and omit the native
+feature, persistent-runtime, and RACER selection flags. Retain the same workers,
+task IDs, engine slot cap, and overlap setting. The serving manifest records
+per-task completion, lane assignment, engine telemetry, and throughput. The
+`serve` action enables the decode CUDA graph for both arms and the v4 C2KV
+async gist worker, compact response, first-miss bulk lookup, and budget-fit
+prewarm for the native arm. The normal `run` action keeps its single-flight
+environment.

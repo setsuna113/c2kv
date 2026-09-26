@@ -1214,12 +1214,74 @@ def handled_capacity_failures(final: Mapping[str, Any], server_dir: Path) -> int
             f"Model attempts failed outside a safe capacity fallback: {error}; "
             f"see {Path(server_dir) / 'final.json'}") from error
 
+DYNAMIC_PERSISTENT_CLOSE_TIMEOUT_SECONDS = 10
+
+
+class PersistentTaskServer:
+    """Own one lane process while the ordinary server runs each task afresh."""
+
+    def __init__(self, args: argparse.Namespace, tasks: list[str], controller_path: Path,
+                 *, dynamic: bool = False):
+        if args.benchmark != "bfcl":
+            raise ValueError("Persistent runtime currently supports BFCL only")
+        plan = [commands_for_task(args, task, controller_path)[0] for task in tasks]
+        self.plan_path = args.out / "persistent_lane_plan.json"
+        self.dynamic = dynamic
+        save(self.plan_path, plan)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME / "python"), str(RUNTIME)))
+        self.log = (args.out / "persistent_lane.log").open("w", encoding="utf-8")
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, "-m", "benchmarks.memory_runtime.event_native_persistent",
+                 str(self.plan_path.resolve()), *(["--dynamic"] if dynamic else [])],
+                cwd=RUNTIME, env=env, stdout=self.log, stderr=subprocess.STDOUT,
+                start_new_session=os.name == "posix",
+            )
+        except BaseException:
+            self.log.close()
+            raise
+
+    def stop_task(self, task_out: Path, deadline: float) -> None:
+        server_dir = task_out / "server"
+        (server_dir / "persistent_task_stop.requested").touch()
+        complete = server_dir / "persistent_task_complete.json"
+        while not complete.is_file():
+            if self.process.poll() is not None:
+                raise RuntimeError(f"Persistent lane exited {self.process.returncode}; see {self.log.name}")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Persistent task server finalization timeout")
+            time.sleep(0.05)
+
+    def close(self) -> None:
+        try:
+            if self.process.poll() is None:
+                if self.dynamic:
+                    (self.plan_path.parent / "persistent_lane_stop.requested").touch()
+                try:
+                    self.process.wait(timeout=(DYNAMIC_PERSISTENT_CLOSE_TIMEOUT_SECONDS
+                                               if self.dynamic else 2))
+                except subprocess.TimeoutExpired:
+                    runner._stop_server(self.process, self.plan_path.with_suffix(".supervisor.json"))
+                    if self.dynamic:
+                        raise TimeoutError(
+                            "Dynamic persistent lane did not stop within "
+                            f"{DYNAMIC_PERSISTENT_CLOSE_TIMEOUT_SECONDS}s after its close marker")
+            else:
+                self.process.wait(timeout=5)
+            if self.dynamic and self.process.returncode != 0:
+                raise RuntimeError(f"Dynamic persistent lane exited {self.process.returncode}")
+        finally:
+            self.log.close()
+
 
 def run_task(args: argparse.Namespace, task: str, controller_path: Path,
-             *, termination_guard=None) -> tuple[dict, dict]:
+             *, termination_guard=None, persistent_server: PersistentTaskServer | None = None) -> tuple[dict, dict]:
     server_command, worker_command = commands_for_task(args, task, controller_path)
     task_out = args.out / "task_shards" / task
     task_out.mkdir(parents=True)
+    if persistent_server is not None:
+        (task_out / "persistent_task_start.requested").touch()
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME / "python"), str(RUNTIME)))
     worker_env = env.copy()
@@ -1230,13 +1292,18 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
     process = worker = wall_timeout = None
     deadline = time.monotonic() + args.task_timeout
     started = time.monotonic()
+    phases = {"schema": "c1-task-lifecycle-v1", "task_id": task,
+              "persistent_runtime": persistent_server is not None,
+              "started_unix_ns": time.time_ns(),
+              "started_monotonic_ns": time.monotonic_ns()}
     summary_path = _official_summary_path(args, task_out)
     try:
         with (task_out / "controller.log").open("w", encoding="utf-8") as log:
-            process = subprocess.Popen(
-                server_command, cwd=RUNTIME, env=env, stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=os.name == "posix",
-            )
+            process = (persistent_server.process if persistent_server is not None else
+                       subprocess.Popen(
+                           server_command, cwd=RUNTIME, env=env, stdout=log,
+                           stderr=subprocess.STDOUT, start_new_session=os.name == "posix",
+                       ))
             ready_path = task_out / "server" / "ready.json"
             while not ready_path.exists():
                 if process.poll() is not None:
@@ -1244,6 +1311,7 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Controller readiness timeout")
                 time.sleep(1)
+            phases["server_ready_seconds"] = time.monotonic() - started
             if args.method == "c2kv_native":
                 import native_bare
                 native_bare.validate_manifest(ready_path, args.ratio)
@@ -1254,6 +1322,7 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                     args.tool_memory, getattr(args, "tool_checkpoint", None),
                     getattr(args, "tool_budget_tokens", None))
             with (task_out / "benchmark.log").open("w", encoding="utf-8") as bench_log:
+                phases["harness_start_seconds"] = time.monotonic() - started
                 worker = subprocess.Popen(
                     worker_command, cwd=RUNTIME, env=worker_env, stdout=bench_log,
                     stderr=subprocess.STDOUT, start_new_session=os.name == "posix",
@@ -1263,6 +1332,7 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                 except subprocess.TimeoutExpired as error:
                     wall_timeout = TaskWallTimeout(task, args.task_timeout, time.monotonic() - started)
                     raise wall_timeout from error
+                phases["harness_end_seconds"] = time.monotonic() - started
             if result:
                 raise RuntimeError(f"Official {args.benchmark} worker exited {result}; see {task_out / 'benchmark.log'}")
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -1275,13 +1345,29 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                     runner._stop_bfcl(worker, task_out / args.benchmark / "running.json")
             finally:
                 if process is not None:
-                    runner._stop_server(process, task_out / "server.supervisor.json")
+                    active_error = sys.exc_info()[1]
+                    try:
+                        if persistent_server is not None:
+                            persistent_server.stop_task(task_out, deadline)
+                        else:
+                            runner._stop_server(process, task_out / "server.supervisor.json")
+                    except BaseException as cleanup_error:
+                        if active_error is None:
+                            raise
+                        if hasattr(active_error, "add_note"):
+                            active_error.add_note(
+                                f"Additionally, controller cleanup failed: {cleanup_error}")
+                phases["server_final_seconds"] = time.monotonic() - started
+                phases["ended_unix_ns"] = time.time_ns()
+                phases["ended_monotonic_ns"] = time.monotonic_ns()
+                save(task_out / "lifecycle.json", phases)
                 if wall_timeout is not None:
                     wall_timeout.engine_cleanup = release_engine_session(args, task_out / "server")
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     if (final.get("cost_summary_error") or final.get("status") == "failed"
-            or final.get("stop_reason") == "runner_failed" or process.returncode != 0):
+            or final.get("stop_reason") == "runner_failed"
+            or (persistent_server is None and process.returncode != 0)):
         raise RuntimeError(f"Controller finalization failed; see {final_path}")
     journal = final.get("journal_summary") or {}
     if (journal.get("pending") or not journal.get("completed")

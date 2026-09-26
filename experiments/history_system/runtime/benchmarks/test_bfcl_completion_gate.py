@@ -59,6 +59,9 @@ def test_evaluate_only_uses_valid_unique_rows_and_preserves_raw(tmp_path, monkey
     assert len(raw.read_text().splitlines()) == 4
     assert summary["completion_ledger"]["duplicate_rows"] == 2
     assert summary["completion_ledger"]["invalid_rows"] == 1
+    phases = summary["harness_phase_timing"]["phases"]
+    assert "generation_and_tools" not in phases
+    assert phases["official_scoring"]["status"] == "completed"
     assert terminal_check.check_bfcl(
         2, ",".join(ids), handler="c2kv-hf", category="multi_turn_base",
         root=tmp_path,
@@ -139,3 +142,31 @@ def test_fc_guard_tool_block_evidence_matches_native_parser(text):
 
     assert _complete_native_tool_calls(text) == (
         parse_native_draft(text, call_id_prefix="audit").status == "tool_calls")
+
+
+def test_harness_timing_separates_generation_from_official_scoring(tmp_path, monkeypatch):
+    task = "multi_turn_base_0"
+    clock = [0]
+    monkeypatch.setattr(bfcl_adapter.time, "perf_counter_ns", lambda: clock[0])
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bfcl_adapter, "official_category_ids",
+                        lambda category: {"multi_turn_base": [task]})
+    monkeypatch.setattr(bfcl_adapter, "summarize_audit", lambda path: {})
+
+    def run_cli(argv):
+        if argv[0] == "generate":
+            clock[0] += 100
+            _write_jsonl(tmp_path / "result/c2kv-hf/multi_turn/BFCL_v4_multi_turn_base_result.json",
+                         [{"id": task, "result": []}])
+        else:
+            clock[0] += 10
+            _write_jsonl(tmp_path / "score/c2kv-hf/multi_turn/BFCL_v4_multi_turn_base_score.json",
+                         [{"accuracy": 0.0, "correct_count": 0, "total_count": 1}])
+
+    monkeypatch.setattr(bfcl_adapter, "run_cli", run_cli)
+    summary = bfcl_adapter.run_bfcl("http://proxy/v1", mode="both", project_root=tmp_path)
+    phases = summary["harness_phase_timing"]["phases"]
+    assert phases["generation_and_tools"]["duration_ns"] == 100
+    assert phases["official_scoring"]["duration_ns"] == 10
+    assert summary["n_scored"] == 1
+    assert all(row["status"] == "completed" for row in phases.values())

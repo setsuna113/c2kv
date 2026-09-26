@@ -1013,6 +1013,25 @@ def _unsupported_stage(stage, cell):
     return None
 
 
+def paper_env(config, source):
+    """Environment shared by an isolated paper engine and its children."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(source / "python"), str(ROOT.parent), env.get("PYTHONPATH", "")])
+    env["BENCH_BFCL_DIR"] = config["bfcl_dir"]
+    env["APPWORLD_ROOT"] = config["appworld_root"]
+    env["C2KV_PAPER_TELEMETRY"] = "1"
+    for key in ("C2KV_NATIVE_RAW_PREFIX_CACHE", "C2KV_NATIVE_BACKGROUND_EXTRAS",
+                "C2KV_NATIVE_BULK_CACHE_LOOKUP", "C2KV_NATIVE_CROSS_TURN_PREWARM",
+                "C2KV_NATIVE_ASYNC_COMPRESSION", "C2KV_INCREMENTAL_TOKENIZATION",
+                "C2KV_GIST_ASYNC_FOREGROUND", "C2KV_PAPER_POOL_SNAPSHOT",
+                "C2KV_PREFILL_GRAPH_512"):
+        env[key] = "0"
+    env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "0"
+    env.setdefault("CUDA_HOME", "/opt/cuda")
+    env["PATH"] = str(Path(config["server_python"]).parent) + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def execute(config, plan, output, source, stages, selected, port_offset=0):
     _, unknown = _selected_plan(plan, selected)
     if any(is_subset(cell) for cell in plan):
@@ -1022,15 +1041,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             raise ValueError("Task subsets require --stage closed_loop")
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(source / "python"), str(ROOT.parent), env.get("PYTHONPATH", "")])
-    env["BENCH_BFCL_DIR"] = config["bfcl_dir"]
-    env["APPWORLD_ROOT"] = config["appworld_root"]
-    env["C2KV_PAPER_TELEMETRY"] = "1"
-    env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "0"
-    env.setdefault("CUDA_HOME", "/opt/cuda")
-    env["PATH"] = (str(Path(config["server_python"]).parent) + os.pathsep
-                   + env.get("PATH", ""))
+    env = paper_env(config, source)
     for stage in stages:
         for cell in plan:
             if selected and cell["cell_id"] not in selected:
@@ -1279,9 +1290,9 @@ def aggregate_results(config, plan, output, stages, selected):
 @unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore"])
+    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore", "serve"])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
+    parser.add_argument("--sglang-source", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
@@ -1307,7 +1318,7 @@ def main(argv=None):
                              "c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm")
     parser.add_argument("--racer-policies", default="",
                         help="opt-in RACER policies: all or comma-separated exact policy names")
-    parser.add_argument("--racer-protection", default="off,on",
+    parser.add_argument("--racer-protection",
                         help="extra protection values: off,on (default) or one value")
     parser.add_argument("--racer-retrieval-draft", default="on",
                         help="v4 lexical source query draft: on (default), off, or on,off")
@@ -1338,10 +1349,66 @@ def main(argv=None):
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     parser.add_argument("--generation-timeout", type=float,
                         help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
+    parser.add_argument("--workers", type=int,
+                        help="serve only: concurrent tasks sharing one engine")
+    parser.add_argument("--serve-tasks", default="",
+                        help="serve only: comma-separated official task IDs")
+    parser.add_argument("--native-raw-prefix-cache", action="store_true")
+    parser.add_argument("--background-extras", action="store_true")
+    parser.add_argument("--bulk-cache-lookup", action="store_true")
+    parser.add_argument("--cross-turn-prewarm", action="store_true")
+    parser.add_argument("--async-compression", action="store_true")
+    parser.add_argument("--persistent-runtime", action="store_true")
+    parser.add_argument("--dynamic-persistent-runtime", action="store_true")
+    parser.add_argument("--incremental-tokenization", action="store_true")
+    parser.add_argument("--overlap-schedule", action="store_true")
+    parser.add_argument("--engine-max-running-requests", type=int)
+    parser.add_argument("--radix-eviction-policy", choices=("lru", "lfu", "slru", "priority"))
     args = parser.parse_args(argv)
+    if args.action == "serve":
+        if args.sglang_source is None or args.workers is None or args.workers < 1:
+            parser.error("serve requires --sglang-source and --workers >= 1")
+        if args.racer_schema != "v4" or args.stage == "common_prefix":
+            parser.error("serve requires v4 closed-loop cells")
+        if len(set(filter(None, args.cells.split(",")))) != 1:
+            parser.error("serve takes exactly one --cells id")
+    elif args.workers is not None or args.serve_tasks:
+        parser.error("--workers and --serve-tasks apply only to serve")
     config = json.loads(args.config.read_text())
     if args.history_kv_budget_tokens is not None:
         config["history_kv_budget_tokens"] = args.history_kv_budget_tokens
+    feature_flags = (
+        (args.native_raw_prefix_cache, "serving_native_raw_prefix_cache"),
+        (args.background_extras, "serving_background_extras"),
+        (args.bulk_cache_lookup, "serving_bulk_cache_lookup"),
+        (args.cross_turn_prewarm, "serving_cross_turn_prewarm"),
+        (args.async_compression, "serving_async_compression"),
+        (args.persistent_runtime, "serving_persistent_runtime"),
+        (args.incremental_tokenization, "serving_incremental_tokenization"),
+    )
+    for enabled, key in feature_flags:
+        if enabled:
+            if args.action not in {"prepare", "serve"}:
+                parser.error("Serving feature flags apply only to prepare/serve")
+            config[key] = True
+    if args.dynamic_persistent_runtime:
+        if args.action not in {"prepare", "serve"}:
+            parser.error("Dynamic persistent runtime applies only to prepare/serve")
+        config["serving_dynamic_persistent_runtime"] = True
+    if args.overlap_schedule:
+        if args.action != "serve":
+            parser.error("Overlap schedule applies only to serve")
+        config["serving_overlap_schedule"] = True
+    if args.engine_max_running_requests is not None:
+        if args.action != "serve" or args.engine_max_running_requests < 1:
+            parser.error("Engine request cap requires serve and a positive integer")
+        config["serving_engine_max_running_requests"] = args.engine_max_running_requests
+    if args.radix_eviction_policy is not None:
+        if args.action != "serve":
+            parser.error("Radix eviction policy applies only to serve")
+        config["serving_radix_eviction_policy"] = args.radix_eviction_policy
+    if args.action == "run" and any(config.get(key, False) for _, key in feature_flags):
+        parser.error("This config enables serving optimizations; use serve")
     if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
                                      or args.stage == "common_prefix"):
         parser.error("rescore scores explicit closed-loop --cells of an existing output root")
@@ -1362,9 +1429,10 @@ def main(argv=None):
         racer_backends = parse_racer_backends(args.racer_backends)
         racer_policies = parse_racer_policies(
             args.racer_policies, paired_off=args.racer_schema == "v2")
-        racer_protections = parse_racer_protections(args.racer_protection)
+        protection_arg = args.racer_protection or ("on" if args.action == "serve" else "off,on")
+        racer_protections = parse_racer_protections(protection_arg)
         racer_retrieval_drafts = parse_racer_retrieval_drafts(args.racer_retrieval_draft)
-        if args.racer_schema == "v2" and args.racer_protection != "off,on":
+        if args.racer_schema == "v2" and protection_arg != "off,on":
             parser.error("--racer-protection applies only to --racer-schema v3 or v4")
         if args.racer_schema != "v4" and racer_retrieval_drafts != ("on",):
             parser.error("--racer-retrieval-draft applies only to --racer-schema v4")
@@ -1391,7 +1459,7 @@ def main(argv=None):
         if args.action == "run" and "task_subsets" in config and args.stage != "closed_loop":
             parser.error("Task subsets require --stage closed_loop")
     output = args.output or Path(config["output_root"])
-    source = args.sglang_source.resolve()
+    source = (args.sglang_source or ROOT.parent.parent / "sglang-paper").resolve()
     if args.action in {"aggregate", "rescore"}:
         config = json.loads((output / "config.resolved.json").read_text())
         plan = json.loads((output / "commands.json").read_text())
@@ -1404,6 +1472,20 @@ def main(argv=None):
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),
                 port_offset=args.port_offset)
+    elif args.action == "serve":
+        from .c1 import selected_tasks
+        from .serving import serve_cell
+        (cell_id,) = set(filter(None, args.cells.split(",")))
+        cell = next((row for row in plan if row["cell_id"] == cell_id), None)
+        if cell is None:
+            parser.error(f"Unknown cell {cell_id!r}")
+        tasks = selected_tasks(config, cell["benchmark"],
+                               args.serve_tasks.split(",") if args.serve_tasks else None)
+        manifest = serve_cell(config, cell, output, source, output / "deployment_profile.json",
+                              workers=args.workers, tasks=tasks, port_offset=args.port_offset)
+        print(json.dumps({key: manifest[key] for key in
+                          ("cell_id", "workers", "n_tasks", "n_scored", "total_runtime_seconds",
+                           "tasks_per_hour", "successful_tasks_per_hour", "status")}, indent=2))
     elif args.action == "rescore":
         from .rescore import rescore_cells
         receipts = rescore_cells(plan, output, set(filter(None, args.cells.split(","))))

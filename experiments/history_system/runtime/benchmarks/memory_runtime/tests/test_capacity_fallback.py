@@ -143,6 +143,37 @@ def fallback(budget):
     return CapacityFallbackAllocator(s0(budget))
 
 
+def test_opt_in_token_cache_preserves_s0_decisions_across_append():
+    cached = s0(1_000_000)
+    cached.enable_native_token_cache(max_entries=256, max_token_ids=100_000)
+    reference = s0(1_000_000)
+    first = payload("token-cache")
+    second = copy.deepcopy(first)
+    second["decision_key"] = "d2"
+    second["messages"].append({"role": "user", "content": "Next request."})
+    for request in (first, second):
+        expected = reference.prepare(request, ratio=8, max_new_tokens=8)
+        actual = cached.prepare(request, ratio=8, max_new_tokens=8)
+        assert actual.memory == expected.memory
+        assert actual.eligible_chunks == expected.eligible_chunks
+        assert actual.metadata == expected.metadata
+    assert cached.token_cache_info()["hits"] > 0
+    assert cached.token_cache_info()["session_id"] == "token-cache"
+
+
+def test_opt_in_token_cache_preserves_capacity_fallback_output():
+    request = payload("cached-fallback")
+    base = s0(26)
+    base.enable_native_token_cache(max_entries=256, max_token_ids=100_000)
+    cached = CapacityFallbackAllocator(base).prepare(
+        request, ratio=8, max_new_tokens=8)
+    fresh = fallback(26).prepare(request, ratio=8, max_new_tokens=8)
+    assert cached.memory == fresh.memory
+    assert cached.eligible_chunks == fresh.eligible_chunks
+    assert cached.metadata == fresh.metadata
+    assert base.token_cache_info()["hits"] > 0
+
+
 def test_legacy_feasible_path_is_the_exact_incumbent_object_and_behavior():
     request = payload("legacy")
     base = s0(1_000_000)

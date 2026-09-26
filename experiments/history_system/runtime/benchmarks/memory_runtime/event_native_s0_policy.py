@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -20,6 +21,7 @@ from history_memory.packing import (
     pack_memory,
     visible_message,
 )
+from history_memory.token_cache import NativeTokenCache
 
 from .adapter import raw_source_cutoff
 from .always_compress import (
@@ -152,6 +154,18 @@ class EventNativeS0Controller:
         self.protected_recovery_messages: Sequence[Mapping[str, Any]] = ()
         self._owner = object()
         self._sessions: dict[str, _SessionState] = {}
+        self._native_token_cache: NativeTokenCache | None = None
+
+    def enable_native_token_cache(self, *, max_entries: int = 512,
+                                  max_token_ids: int = 200_000) -> None:
+        """Opt in to bounded exact-input tokenization reuse across turns."""
+        self._native_token_cache = NativeTokenCache(
+            self.tokenizer, max_entries=max_entries, max_token_ids=max_token_ids)
+
+    def token_cache_info(self) -> dict[str, Any]:
+        cache = self._native_token_cache
+        return {"enabled": cache is not None,
+                **(cache.info() if cache is not None else {})}
 
     def prepare(
         self,
@@ -165,6 +179,8 @@ class EventNativeS0Controller:
         )
         from .backend_capacity import current_constraints
         capacity = current_constraints(session_id, decision_key, "draft")
+        if self._native_token_cache is not None:
+            self._native_token_cache.set_session(session_id)
         encoding_scope = validate_encoding_scope(self.encoding_scope)
         protected_signature = _canonical_json(
             tuple(self.protected_recovery_messages)
@@ -202,14 +218,16 @@ class EventNativeS0Controller:
                 return prepared
 
         decision_index = (state.decision_index if state is not None else 0) + 1
-        prepared = self._prepare_view(
-            store,
-            tools,
-            ratio=ratio,
-            max_new_tokens=max_new_tokens,
-            decision_key=decision_key,
-            decision_index=decision_index,
-        )
+        cache = self._native_token_cache
+        with cache.rendering_scope() if cache is not None else nullcontext():
+            prepared = self._prepare_view(
+                store,
+                tools,
+                ratio=ratio,
+                max_new_tokens=max_new_tokens,
+                decision_key=decision_key,
+                decision_index=decision_index,
+            )
         decisions = dict(state.decisions) if state is not None else {}
         decisions[decision_key] = (signature, prepared)
         self._sessions[session_id] = _SessionState(
@@ -378,6 +396,7 @@ class EventNativeS0Controller:
             chunk_overlap=self.packing.chunk_overlap,
             atomic_unit_token_limit=self._atomic_unit_token_limit(),
             event_groups=scope_plan.event_groups,
+            token_cache=self._native_token_cache,
         )
 
         complete_tools = [
@@ -1397,6 +1416,7 @@ class EventNativeS0Controller:
                     if fallback_context
                     else None
                 ),
+                token_cache=self._native_token_cache,
             )
         except EncodingScopeCapacityError:
             raise
@@ -1556,7 +1576,8 @@ class EventNativeS0Controller:
             gist_event_ids=(),
             raw_event_ids=tuple(event.event_id for event in store.events),
         )
-        full_memory = pack_memory(store, full_view, self.tokenizer, tools=tools)
+        full_memory = pack_memory(store, full_view, self.tokenizer, tools=tools,
+                                  token_cache=self._native_token_cache)
         full_prompt_tokens = len(full_memory.system_input_ids) + len(
             full_memory.workspace_input_ids
         )
@@ -1609,6 +1630,7 @@ class EventNativeS0Controller:
                 list(messages),
                 tools=tools or None,
                 generation=True,
+                token_cache=self._native_token_cache,
             )
         )
 
